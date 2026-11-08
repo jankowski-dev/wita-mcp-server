@@ -241,3 +241,13 @@
 - У пользователя БАЗИС-Мебельщик **2022.12.21** (сборка 36090). Ожидаемая версия скриптового API ~v3–v4; проверяется probe.
 - В полном справочнике (`research/Script_functions.txt`) подтверждено: НЕТ таймеров и сетевых модулей вообще; обход дерева — `T3DObjectList.Count` + `.Objects[i]` (IndexedProperty); модули для моста (`currentFileData`, `execution`, `objectTypeChecker`, `objectTransformation`, `historyOperations`, `objects3d`, `UI`, `interaction`) добавлены в v1; `batchProcessing` — в v3; `apiVersion` — в v2.
 - Создан каркас: `server/` (MCP, stdio, tools: probe_report/status/execute/model_summary), `bridge/basis_mcp_probe.js`, `bridge/basis_mcp_bridge.js` (лестница живучести: setInterval → мышиный тик → отказ с сообщением). root обмена: C:\Users\Public\basis-mcp.
+
+## Проект зафиксирован на GitHub (09.11.2026)
+
+- Репозиторий: https://github.com/jankowski-dev/wita-mcp-server (public, MIT).
+- Структура: AGENTS.md (инструкции агенту), README, docs/ (ARCHITECTURE, OPERATIONS,
+  ENGINE-NOTES, WORKFLOW, DESIGN-RULES), bridge/ (worker/stop/probe), server/ (MCP),
+  tools/ (install-worker.ps1, screenshot.ps1), research/NOTES.md (этот журнал).
+- Конфиг: opencode.example.json с АБСОЛЮТНЫМИ путями (относительные OpenCode не
+  принимает — проверено: сервер не стартует).
+- Секреты/локали: opencode.json, node_modules, сырые PDF/HTML руководств — в .gitignore.
