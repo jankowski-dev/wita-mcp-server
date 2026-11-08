@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "basis": {
+        "type": "local",
+        "command": [
+          "C:\\Program Files\\nodejs\\node.exe",
+          "C:\\path\\to\\wita-mcp-server\\server\\src\\index.js"
+        ],
+        "environment": {
+          "BASIS_MCP_DIR": "C:\\Users\\Public\\basis-mcp"
+        }
+      }
+    }
+  }
+}

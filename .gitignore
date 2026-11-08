@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+package-lock.json
+
+# local config (machine-specific)
+opencode.json
+
+# runtime artifacts
+*.log
+inbox/
+outbox/
+states/
+log/
+
+# research raw docs (copyrighted official manuals, keep local)
+research/*.pdf
+research/*.html
+research/Script_guide.txt
+research/Script_functions.txt
+research/Script_examples.txt
+research/experimental.ts
+research/modules_example.ts
+
+# binaries / experiments
+tools/ahk/*.exe
+tools/ahk/*.zip
+tools/ahk/*.chm
+tools/ahk/UX/
+tools/*.png
+tools/*.log
+tools/arm.log
+tools/uia_tree.txt
+tools/menu_probe.txt
+
+# OS junk
+Thumbs.db
+.DS_Store
