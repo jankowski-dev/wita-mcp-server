@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.0";
+var BASIS_MCP_VERSION = "0.6.1";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -599,20 +599,97 @@ var BASIS_MCP_HANDLERS = {
       if (out.methodScan.object.Clone === "function") {
         var cEntry = { step: "clone", err: null };
         try {
+          var countPreClone = basisMcpSafeNum(function () { return Model.Count; }, null);
           var cp = panel.Clone();
+          var countPostClone = basisMcpSafeNum(function () { return Model.Count; }, null);
           if (cp) {
+            var cpName = basisMcpSafeStr(function () { return cp.Name; }, null);
             cEntry.clone = {
-              name: basisMcpSafeStr(function () { return cp.Name; }, null),
+              preCommit: { countBefore: countPreClone, countAfter: countPostClone },
+              name: cpName,
+              inTree: basisMcpFindByPath([cpName]) !== null,
+              propScan: scanProbeMethods(cp, ["Position", "Name", "MaterialName", "Thickness", "Contour", "Butts", "GMin", "GMax"]),
               geo: geoOf(cp)
             };
-            try { DeleteObject(cp); cEntry.cleanup = true; }
-            catch (eDelCp) { cEntry.cleanup = String(eDelCp); }
+            /* delete while still pending */
+            try {
+              DeleteObject(cp);
+              cEntry.cleanup = { preCommitDelete: true, treeOk: basisMcpSafeNum(function () { return Model.Count; }, null) === countPreClone };
+            } catch (eDelCp) { cEntry.cleanup = String(eDelCp); }
           } else { cEntry.err = "Clone() returned null"; }
         } catch (eCl) { cEntry.err = String(eCl); }
         out.steps.push(cEntry);
       } else {
         out.steps.push({ step: "clone", err: "no Clone method" });
       }
+
+      /* ---- read-only scan of a REAL system panel's butts (schema of a
+       * Butt object with live data; we need side/elem info for copy) ---- */
+      (function scanRealButts() {
+        var found = null, res = [];
+        var walk = function (list) {
+          if (found) return;
+          var n = 0;
+          try { n = Number(list.Count) || 0; } catch (eC) { return; }
+          for (var i = 0; i < n; i++) {
+            var c = null;
+            try { c = list[i]; } catch (eIdx) { continue; }
+            if (!c) continue;
+            if (!found && basisMcpQuietBool(function () { return c.Butts !== undefined && c.Contour !== undefined; }) && c.Butts.Count > 0) {
+              found = c; return;
+            }
+            if (basisMcpQuietBool(function () { return c.Count !== undefined; })) walk(c);
+          }
+        };
+        try { walk(Model); } catch (eW) { res.push("walk error: " + eW); }
+        if (found) {
+          try {
+            var bc = found.Butts;
+            for (var b = 0; b < bc.Count; b++) {
+              var bt = bc[b];
+              if (!bt) continue;
+              res.push({
+                index: b,
+                propScan: scanProbeMethods(bt, ["Material", "Thickness", "Width", "Start", "End", "Dir", "Elem", "Side", "Position", "Angle", "Name", "AddLabel"]),
+                values: {
+                  material: basisMcpSafeStr(function () { return bt.Material; }, null),
+                  thickness: basisMcpSafeNum(function () { return bt.Thickness; }, null),
+                  width: basisMcpSafeNum(function () { return bt.Width; }, null),
+                  start: (function () { try { var s = bt.Start; if (!s) return null; return { x: Number(s.x), y: Number(s.y) }; } catch (eS) { return "err"; } })(),
+                  dir: (function () { try { var d = bt.Dir; if (!d) return null; return { x: Number(d.x), y: Number(d.y) }; } catch (eD) { return "err"; } })()
+                }
+              });
+            }
+          } catch (eB) { res.push("butts error: " + eB); }
+        }
+        out.buttSchema = res.length ? res : "no panel with butts found";
+      })();
+
+      /* ---- can we recreate a butt from a material NAME string? ---- */
+      (function probeButtFromName() {
+        var res = { input: {}, add: {}, butts: null };
+        try {
+          var inp = NewButtMaterialInput("BasisMCP name-recreate probe");
+          res.input.compose = "NewButtMaterialInput ok";
+          try { inp.Name = "F433 ST10 \u041b\u0451\u043d \u0430\u043d\u0442\u0440\u0430\u0446\u0438\u0442"; } catch (eN1) { res.input.name = "err: " + eN1; }
+          try { inp.Name = inp.Name + "\r1381123"; } catch (eN2) { res.input.nameSuf = "err: " + eN2; }
+          try { inp.Material = inp.Name; } catch (eM) { res.input.material = "err: " + eM; }
+          res.input.readback = {
+            name: basisMcpSafeStr(function () { return inp.Name; }, null),
+            material: basisMcpSafeStr(function () { return inp.Material; }, null),
+            thickness: basisMcpSafeNum(function () { return inp.Thickness; }, null),
+            width: basisMcpSafeNum(function () { return inp.Width; }, null)
+          };
+          try {
+            var bt = panel.AddButt(inp, 0);
+            res.add.elem0 = bt ? "ok" : "null";
+          } catch (eA) { res.add.elem0 = "err: " + eA; }
+          basisMcpCommit();
+          var f2 = refetch();
+          res.butts = basisMcpSafeNum(function () { return f2.Butts.Count; }, null);
+        } catch (eB2) { res.error = String(eB2); }
+        out.buttFromName = res;
+      })();
 
       panel = refetch();
       out.finalGeo = geoOf(panel);
@@ -778,35 +855,85 @@ var BASIS_MCP_HANDLERS = {
 
   /* Copy a panel/object via Clone() (PROBED: works; Copy does not exist).
    * Clone inherits material and geometry; rename to a unique name. */
+  /* Copy a panel by RECREATING it (Clone() proven dead after Commit in
+   * v0.6.0 battery: object never appears in the tree). v2: read the source
+   * geometry, then build an equal panel via the Add*Panel factory.
+   * orientation: front|horiz|vert (inferred from the local thickness axis
+   * when omitted). Rect is rebuilt from Position (reliable) + contour size.
+   * Butts are NOT copied (no reliable side info yet) - re-add via add_butt. */
   copy_object: function (p) {
     if (!p || !p.path) throw new Error("copy_object requires path");
     var src = basisMcpFindByPath(p.path);
     if (!src) throw new Error("object not found by path");
-    if (typeof src.Clone !== "function") throw new Error("object has no Clone()");
-    var srcName = basisMcpSafeStr(function () { return src.Name; }, null) || "object";
-    var newName = p.newName ? String(p.newName) : (srcName + " copy");
-    var countBefore = basisMcpSafeNum(function () { return Model.Count; }, null);
-    var cp = src.Clone();
-    if (!cp) throw new Error("Clone() returned null");
-    try { cp.Name = newName; } catch (eN) { newName = srcName; /* keep auto name */ }
-    var off = p.offset || {};
-    var ddx = Number(off.dx || 0), ddy = Number(off.dy || 0), ddz = Number(off.dz || 0);
-    var offsetApplied = false;
-    if (ddx !== 0 || ddy !== 0 || ddz !== 0) {
-      try {
-        if (typeof cp.Translate === "function") { cp.Translate(ddx, ddy, ddz); offsetApplied = true; }
-      } catch (eT) { /* keep in place */ }
+    if (basisMcpQuietBool(function () { return src.Butts === undefined || src.Contour === undefined; })) {
+      throw new Error("copy_object currently supports panels only (v2 recreate strategy)");
     }
-    var committed = basisMcpCommit();
+    var srcName = basisMcpSafeStr(function () { return src.Name; }, null) || "panel";
+    var pos = basisMcpPosOf(src);
+    if (!pos) throw new Error("source Position is not readable");
+    var cw = basisMcpSafeNum(function () { return src.ContourWidth; }, null);
+    var ch = basisMcpSafeNum(function () { return src.ContourHeight; }, null);
+    if (cw === null || ch === null) throw new Error("source ContourWidth/Height not readable");
+    var th = basisMcpSafeNum(function () { return src.Thickness; }, null) || 16;
+    var mat = basisMcpSafeStr(function () { return src.MaterialName; }, null);
+    var buttCount = basisMcpSafeNum(function () { return src.Butts.Count; }, null);
+
+    /* orientation: explicit param wins; otherwise infer from the LOCAL
+     * thickness axis (front: z, horiz: y, vert: x) */
+    var orientation = p.orientation || null;
+    if (!orientation) {
+      orientation = (function infer() {
+        var gm = null;
+        try { gm = src.GMax; } catch (eG) { return "front"; }
+        if (!gm) return "front";
+        var ex = { x: Math.abs(Number(gm.x)) || 0, y: Math.abs(Number(gm.y)) || 0, z: Math.abs(Number(gm.z)) || 0 };
+        if (Math.abs(ex.z - th) < 0.7) return "front";
+        if (Math.abs(ex.y - th) < 0.7) return "horiz";
+        if (Math.abs(ex.x - th) < 0.7) return "vert";
+        return "front";
+      })();
+    }
+
+    /* unique name: base + " copy", +2, +3... */
+    var baseName = p.newName ? String(p.newName) : (srcName + " copy");
+    var newName = baseName;
+    var nSuffix = 2;
+    while (basisMcpRefetchByName(newName) !== null) {
+      newName = baseName + " " + nSuffix;
+      nSuffix++;
+    }
+
+    /* rect per add_panel conventions; offset shifts the final Position.
+     * The Add*Panel factory maps x/y/depth per orientation itself. */
+    var off = p.offset || {};
+    var dx = Number(off.dx || 0), dy = Number(off.dy || 0), dz = Number(off.dz || 0);
+    var rect = {
+      x1: pos.x + dx, y1: pos.y + dy,
+      x2: pos.x + dx + cw, y2: pos.y + dy + ch,
+      depth: pos.z + dz
+    };
+    var created = BASIS_MCP_HANDLERS.add_panel({
+      orientation: orientation,
+      rect: rect,
+      name: newName,
+      materialName: (mat !== null && mat !== "") ? mat : undefined,
+      thickness: th
+    });
     var countAfter = basisMcpSafeNum(function () { return Model.Count; }, null);
     var fresh = basisMcpRefetchByName(newName);
+    if (!fresh) throw new Error("recreated panel not found in tree: " + newName);
+    var after = basisMcpGeoOf(fresh);
+    var aligned = after.cw === cw && after.ch === ch;
     return {
-      copied: true, committed: committed,
-      source: srcName, name: newName,
-      offsetApplied: offsetApplied,
-      countBefore: countBefore, countAfter: countAfter,
-      readback: fresh ? basisMcpGeoOf(fresh) : null,
-      note: "clone inherits material/geometry; butts copied as-is (verify if edge-specific)"
+      copied: aligned,
+      strategy: "recreate",
+      source: srcName,
+      name: newName,
+      orientation: orientation,
+      sourceGeo: { pos: pos, cw: cw, ch: ch, thickness: th, material: mat, butts: buttCount },
+      after: after,
+      buttsSkipped: buttCount,
+      note: "butts are NOT copied - re-add with add_butt (side info unavailable)"
     };
   },
 
