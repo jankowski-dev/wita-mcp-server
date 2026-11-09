@@ -251,3 +251,19 @@
 - Конфиг: opencode.example.json с АБСОЛЮТНЫМИ путями (относительные OpenCode не
   принимает — проверено: сервер не стартует).
 - Секреты/локали: opencode.json, node_modules, сырые PDF/HTML руководств — в .gitignore.
+
+## RAG-база знаний (09.11.2026) — фаза 2 завершена
+
+- Репозиторий знаний: wita-mcp-knowledge (скиллы + kb + kb-server).
+- Модель: Xenova/multilingual-e5-small (e5-префиксы query:/passage:), чанкинг по
+  разделам Markdown с заголовками в контексте.
+- Корпус: skills/ + kb/sources/ + официальные документы БАЗИС (fetch-docs.js):
+  Script.pdf (руководство 198 стр.), BAZIS-Script_examples.html, Bazis.pdf (2024),
+  статья sapr.ru/24419. Документы скачиваются локально в kb/sources/local-docs/
+  и НЕ коммитятся (авторские права; gitignore).
+- Индекс: 2137 фрагментов, 18 МБ, сборка ~15 минут (CPU). Поиск: 0.90+ на
+  официальной документации («версионирование API», «AddCut паз»).
+- MCP-сервер kb: kb_search(query, topK), kb_stats(). Подключён в opencode.json.
+- Инцидент: при записи opencode.json через bash-heredoc съедались `\` → JSON
+  невалиден → MCP не грузился. Правило: конфиг писать write-инструментом,
+  пути — прямыми слэшами.
