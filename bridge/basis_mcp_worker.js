@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.5.7  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.0  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.5.9";
+var BASIS_MCP_VERSION = "0.6.0";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -87,6 +87,41 @@ function basisMcpChildOf(list, i) {
 }
 function basisMcpQuietBool(fn) {
   try { return !!fn(); } catch (e) { return false; }
+}
+
+/* Mark an EXISTING object as edited before property/geometry changes
+ * (script guide: Undo.Changing(Obj) precedes contour edits). */
+function basisMcpMarkChanged(obj) {
+  try {
+    if (typeof Undo !== "undefined" && Undo && typeof Undo.Changing === "function") { Undo.Changing(obj); return "undo"; }
+  } catch (eU) { /* fallthrough */ }
+  try {
+    if (typeof Action !== "undefined" && Action && typeof Action.StartEditing === "function") { Action.StartEditing(obj); return "startEditing"; }
+  } catch (eS) { /* fallthrough */ }
+  return "none";
+}
+
+/* PROBED (v0.5.9): GMin/GMax are LOCAL and do not refresh after edits;
+ * Position and ContourWidth/ContourHeight reflect changes reliably. */
+function basisMcpPosOf(obj) {
+  try { var ps = obj.Position; return { x: Number(ps.x), y: Number(ps.y), z: Number(ps.z) }; } catch (e) { return null; }
+}
+
+function basisMcpGeoOf(obj) {
+  var g = {};
+  try { var gm = obj.GMin; g.gmin = { x: Number(gm.x), y: Number(gm.y), z: Number(gm.z) }; } catch (e1) { g.gmin = null; }
+  try { var gx = obj.GMax; g.gmax = { x: Number(gx.x), y: Number(gx.y), z: Number(gx.z) }; } catch (e2) { g.gmax = null; }
+  g.pos = basisMcpPosOf(obj);
+  g.cw = basisMcpSafeNum(function () { return obj.ContourWidth; }, null);
+  g.ch = basisMcpSafeNum(function () { return obj.ContourHeight; }, null);
+  g.thickness = basisMcpSafeNum(function () { return obj.Thickness; }, null);
+  g.material = basisMcpSafeStr(function () { return obj.MaterialName; }, null);
+  g.butts = basisMcpSafeNum(function () { return obj.Butts.Count; }, null);
+  return g;
+}
+
+function basisMcpRefetchByName(name) {
+  return basisMcpFindByPath([String(name)]);
 }
 
 /* Distinct-name counter -> sorted [{key, ...}] array for JSON output. */
@@ -602,14 +637,29 @@ var BASIS_MCP_HANDLERS = {
     else cut = obj.Cuts.Add();
     if (!cut) throw new Error("cut was not created");
     var L = p.line || {};
-    cut.Trajectory.AddLine(Number(L.x1 || 0), Number(L.y1 || 0), Number(L.x2 || 0), Number(L.y2 || 0));
+    var pts = p.points || null;
+    var traj = null;
+    if (pts && pts.length && pts.length >= 2) {
+      /* multi-point polyline: chain segments from point i to i+1 */
+      for (var q = 0; q < pts.length - 1; q++) {
+        var a = pts[q], b = pts[q + 1];
+        cut.Trajectory.AddLine(
+          Number(a.x !== undefined ? a.x : a[0]), Number(a.y !== undefined ? a.y : a[1]),
+          Number(b.x !== undefined ? b.x : b[0]), Number(b.y !== undefined ? b.y : b[1])
+        );
+      }
+      traj = { points: pts.length };
+    } else {
+      cut.Trajectory.AddLine(Number(L.x1 || 0), Number(L.y1 || 0), Number(L.x2 || 0), Number(L.y2 || 0));
+      traj = { line: L };
+    }
     cut.Contour.Load(String(p.profile));
     if (p.moveX !== undefined || p.moveY !== undefined) {
       cut.Contour.Move(Number(p.moveX || 0), Number(p.moveY || 0));
     }
     obj.Build();
     var committed = basisMcpCommit();
-    return { cut: true, committed: committed, name: p.name || null, line: L };
+    return { cut: true, committed: committed, name: p.name || null, trajectory: traj };
   },
 
   holes_info: function (p) {
@@ -638,6 +688,126 @@ var BASIS_MCP_HANDLERS = {
       info.holes = "n/a";
     }
     return info;
+  },
+
+  /* Move an object in 3D. PROBED: Translate() works and is reflected in
+   * Position (GMin/GMax do NOT refresh). Verification via position delta. */
+  object_move: function (p) {
+    if (!p || !p.path) throw new Error("object_move requires path");
+    var dx = Number(p.dx || 0), dy = Number(p.dy || 0), dz = Number(p.dz || 0);
+    if (dx === 0 && dy === 0 && dz === 0) throw new Error("object_move requires a non-zero delta (dx/dy/dz)");
+    var obj = basisMcpFindByPath(p.path);
+    if (!obj) throw new Error("object not found by path");
+    if (typeof obj.Translate !== "function") {
+      throw new Error("object has no Translate(); for mounted hardware use delete + re-mount");
+    }
+    var name = basisMcpSafeStr(function () { return obj.Name; }, null);
+    var posBefore = basisMcpPosOf(obj);
+    var marker = basisMcpMarkChanged(obj);
+    obj.Translate(dx, dy, dz);
+    var committed = basisMcpCommit();
+    var fresh = basisMcpRefetchByName(name);
+    var posAfter = basisMcpPosOf(fresh);
+    var effective = null;
+    if (posBefore && posAfter) {
+      effective = {
+        x: Number((posAfter.x - posBefore.x).toFixed(4)),
+        y: Number((posAfter.y - posBefore.y).toFixed(4)),
+        z: Number((posAfter.z - posBefore.z).toFixed(4))
+      };
+    }
+    var ok = effective !== null &&
+             Math.abs(effective.x - dx) < 0.01 &&
+             Math.abs(effective.y - dy) < 0.01 &&
+             Math.abs(effective.z - dz) < 0.01;
+    return {
+      moved: ok, marker: marker, committed: committed, name: name,
+      delta: { x: dx, y: dy, z: dz },
+      effective: effective,
+      posBefore: posBefore, posAfter: posAfter,
+      note: ok ? null : "position did not change by the requested delta - verify visually"
+    };
+  },
+
+  /* Resize a panel by rebuilding its contour. PROBED: Contour.Clear() +
+   * AddRectangle() commits cleanly; ContourWidth/Height verify the result.
+   * Panels are always 0-based, so the anchor defaults to (0,0). */
+  resize_panel: function (p) {
+    if (!p || !p.path) throw new Error("resize_panel requires path");
+    if (p.width === undefined && p.height === undefined) {
+      throw new Error("resize_panel requires width and/or height (contour-local axes)");
+    }
+    var obj = basisMcpFindByPath(p.path);
+    if (!obj) throw new Error("object not found by path");
+    if (basisMcpQuietBool(function () { return obj.Butts === undefined || obj.Contour === undefined; })) {
+      throw new Error("object is not a panel");
+    }
+    var name = basisMcpSafeStr(function () { return obj.Name; }, null);
+    var before = basisMcpGeoOf(obj);
+    var nW = (p.width !== undefined) ? Math.max(1, Number(p.width)) : before.cw;
+    var nH = (p.height !== undefined) ? Math.max(1, Number(p.height)) : before.ch;
+    var x1 = (p.anchorX !== undefined) ? Number(p.anchorX) : 0;
+    var y1 = (p.anchorY !== undefined) ? Number(p.anchorY) : 0;
+    var marker = basisMcpMarkChanged(obj);
+    obj.Contour.Clear();
+    obj.Contour.AddRectangle(x1, y1, x1 + nW, y1 + nH);
+    var committed = basisMcpCommit();
+    var fresh = basisMcpRefetchByName(name);
+    var after = basisMcpGeoOf(fresh);
+    var ok = (after.cw === nW && after.ch === nH);
+    if (!ok) {
+      /* attempt full restore of the pre-edit dimensions */
+      try {
+        basisMcpMarkChanged(fresh);
+        fresh.Contour.Clear();
+        fresh.Contour.AddRectangle(x1, y1, x1 + Math.max(1, before.cw || 1), y1 + Math.max(1, before.ch || 1));
+        basisMcpCommit();
+        fresh = basisMcpRefetchByName(name);
+        after = basisMcpGeoOf(fresh);
+        ok = (after.cw === nW && after.ch === nH);
+      } catch (eRv) { /* report below */ }
+    }
+    return {
+      resized: ok, marker: marker, committed: committed, name: name,
+      requested: { width: nW, height: nH, anchor: { x: x1, y: y1 } },
+      before: { cw: before.cw, ch: before.ch },
+      after: { cw: after.cw, ch: after.ch },
+      note: ok ? null : "contour did not verify; dimensions restored or unchanged"
+    };
+  },
+
+  /* Copy a panel/object via Clone() (PROBED: works; Copy does not exist).
+   * Clone inherits material and geometry; rename to a unique name. */
+  copy_object: function (p) {
+    if (!p || !p.path) throw new Error("copy_object requires path");
+    var src = basisMcpFindByPath(p.path);
+    if (!src) throw new Error("object not found by path");
+    if (typeof src.Clone !== "function") throw new Error("object has no Clone()");
+    var srcName = basisMcpSafeStr(function () { return src.Name; }, null) || "object";
+    var newName = p.newName ? String(p.newName) : (srcName + " copy");
+    var countBefore = basisMcpSafeNum(function () { return Model.Count; }, null);
+    var cp = src.Clone();
+    if (!cp) throw new Error("Clone() returned null");
+    try { cp.Name = newName; } catch (eN) { newName = srcName; /* keep auto name */ }
+    var off = p.offset || {};
+    var ddx = Number(off.dx || 0), ddy = Number(off.dy || 0), ddz = Number(off.dz || 0);
+    var offsetApplied = false;
+    if (ddx !== 0 || ddy !== 0 || ddz !== 0) {
+      try {
+        if (typeof cp.Translate === "function") { cp.Translate(ddx, ddy, ddz); offsetApplied = true; }
+      } catch (eT) { /* keep in place */ }
+    }
+    var committed = basisMcpCommit();
+    var countAfter = basisMcpSafeNum(function () { return Model.Count; }, null);
+    var fresh = basisMcpRefetchByName(newName);
+    return {
+      copied: true, committed: committed,
+      source: srcName, name: newName,
+      offsetApplied: offsetApplied,
+      countBefore: countBefore, countAfter: countAfter,
+      readback: fresh ? basisMcpGeoOf(fresh) : null,
+      note: "clone inherits material/geometry; butts copied as-is (verify if edge-specific)"
+    };
   },
 
   open_furniture: function (p) {
