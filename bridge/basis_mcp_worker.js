@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.3  (old-API, BASIS 2022)
+ * Basis MCP worker v0.5.7  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.5.6";
+var BASIS_MCP_VERSION = "0.5.7";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -87,6 +87,19 @@ function basisMcpChildOf(list, i) {
 }
 function basisMcpQuietBool(fn) {
   try { return !!fn(); } catch (e) { return false; }
+}
+
+/* Distinct-name counter -> sorted [{key, ...}] array for JSON output. */
+function basisMcpMapToSorted(map) {
+  var keys = Object.keys(map).sort();
+  var arr = [];
+  for (var i = 0; i < keys.length; i++) {
+    var k = keys[i];
+    var v = map[k];
+    if (typeof v === "object" && v !== null) { v.key = k; arr.push(v); }
+    else { arr.push({ key: k, count: v }); }
+  }
+  return arr;
 }
 
 /* Changes made by a script exist as "new script objects" and do NOT appear
@@ -363,6 +376,188 @@ var BASIS_MCP_HANDLERS = {
     return info;
   },
 
+  /* Read-only scan: distinct panel materials, edge banding entries, cut names.
+   * Names come from the model itself - the exact spelling of the material DB. */
+  list_materials: function () {
+    var mats = {};
+    var edges = {};
+    var cutNames = {};
+    var cutCount = 0;
+    var panelCount = 0;
+    var objectCount = 0;
+
+    function bump(map, key) { if (key) map[key] = (map[key] || 0) + 1; }
+
+    /* collections (Butts/Cuts) may be accessed via ByIndex / Item / [i] / .Objects[i] */
+    function collOf(col, i) {
+      var attempts = [
+        function () { return col.ByIndex(i); },
+        function () { return col.Item(i); },
+        function () { return col[i]; },
+        function () { return col.Objects[i]; }
+      ];
+      for (var a = 0; a < attempts.length; a++) {
+        try {
+          var v = attempts[a]();
+          if (v) return v;
+        } catch (e) { /* try next */ }
+      }
+      return null;
+    }
+
+    function visit(list) {
+      var n = basisMcpSafeNum(function () { return list.Count; }, 0) || 0;
+      for (var i = 0; i < n; i++) {
+        var obj = basisMcpChildOf(list, i);
+        if (!obj) continue;
+        objectCount++;
+        var isPanel = basisMcpQuietBool(function () { return obj.Butts !== undefined && obj.Contour !== undefined; });
+        if (isPanel) {
+          panelCount++;
+          bump(mats, basisMcpSafeStr(function () { return obj.MaterialName; }, null));
+          var bc = basisMcpSafeNum(function () { return obj.Butts.Count; }, 0) || 0;
+          for (var b = 0; b < bc; b++) {
+            var bt = collOf(obj.Butts, b);
+            if (!bt) continue;
+            var eKey = basisMcpSafeStr(function () { return bt.Name; }, null) ||
+                       basisMcpSafeStr(function () { return bt.Material; }, null) || "?";
+            var e = edges[eKey];
+            if (!e) {
+              e = edges[eKey] = {
+                name: basisMcpSafeStr(function () { return bt.Name; }, null),
+                material: basisMcpSafeStr(function () { return bt.Material; }, null),
+                thickness: basisMcpSafeNum(function () { return bt.Thickness; }, null),
+                width: basisMcpSafeNum(function () { return bt.Width; }, null),
+                count: 0
+              };
+            }
+            e.count++;
+          }
+          var cc = basisMcpSafeNum(function () { return obj.Cuts.Count; }, 0) || 0;
+          if (cc > 0) {
+            cutCount += cc;
+            for (var c = 0; c < cc; c++) {
+              var cut = collOf(obj.Cuts, c);
+              if (cut) bump(cutNames, basisMcpSafeStr(function () { return cut.Name; }, null));
+            }
+          }
+        }
+        if (basisMcpQuietBool(function () { return obj.Count !== undefined; })) visit(obj);
+      }
+    }
+
+    visit(Model);
+    return {
+      panelCount: panelCount,
+      objectCount: objectCount,
+      materials: basisMcpMapToSorted(mats),
+      edges: basisMcpMapToSorted(edges),
+      cuts: { total: cutCount, names: basisMcpMapToSorted(cutNames) }
+    };
+  },
+
+  /* Experimental battery on a scratch panel: what the old API allows for
+   * move / resize / copy of an EXISTING panel. Cleans up after itself. */
+  edit_probe: function () {
+    var out = { steps: [], methodScan: {}, buttsApi: {} };
+    var panel = AddFrontPanel(0, 0, 100, 50, 100);
+    if (!panel) throw new Error("probe panel was not created");
+    try { panel.Name = "MCP-EditProbe"; } catch (eN) { /* keep default */ }
+    var committedStart = basisMcpCommit();
+
+    function geo(o) {
+      var g = {};
+      try { var gm = o.GMin; g.gmin = { x: Number(gm.x), y: Number(gm.y), z: Number(gm.z) }; } catch (e1) { g.gmin = null; }
+      try { var gx = o.GMax; g.gmax = { x: Number(gx.x), y: Number(gx.y), z: Number(gx.z) }; } catch (e2) { g.gmax = null; }
+      return g;
+    }
+    function step(name, fn) {
+      try {
+        fn();
+        out.steps.push({ step: name, err: null, after: geo(panel) });
+      } catch (e) {
+        out.steps.push({ step: name, err: String(e) });
+      }
+    }
+    function scanMethods(obj, names) {
+      var res = {};
+      for (var i = 0; i < names.length; i++) {
+        try { res[names[i]] = typeof obj[names[i]]; } catch (eScan) { res[names[i]] = "error"; }
+      }
+      return res;
+    }
+
+    var g0 = geo(panel);
+    out.steps.push({ step: "base", err: null, after: g0 });
+
+    /* ---- move candidates ---- */
+    out.methodScan.object = scanMethods(panel, ["Copy", "Clone", "Duplicate", "Mirror", "Move", "Move1", "Translate", "SetPosition", "StartEditing"]);
+    try { out.methodScan.positionType = typeof panel.Position; } catch (ePos) { out.methodScan.positionType = "error"; }
+
+    step("position_set", function () {
+      panel.Position = NewVector(20, 10, 5);
+    });
+    step("contour_move_xy", function () {
+      panel.Contour.Move(20, 10);
+    });
+    step("contour_move_xyz", function () {
+      panel.Contour.Move(5, 0, 30);
+    });
+
+    /* ---- resize candidates ---- */
+    if (panel.Contour) {
+      out.methodScan.contour = scanMethods(panel.Contour, ["Move", "Rotate", "AddLine", "AddRectangle", "Clear", "Delete", "Remove", "Scale", "Item", "ByIndex"]);
+    }
+    step("contour_assign_bigger", function () {
+      var nc = NewContour();
+      nc.AddRectangle(0, 0, 160, 60);
+      panel.Contour = nc;
+    });
+    step("contour_assign_restore", function () {
+      var nc2 = NewContour();
+      nc2.AddRectangle(0, 0, 100, 50);
+      panel.Contour = nc2;
+    });
+
+    /* ---- copy candidates ---- */
+    if (out.methodScan.object.Copy === "function") {
+      try {
+        var countBefore = basisMcpSafeNum(function () { return Model.Count; }, null);
+        var cp = panel.Copy();
+        var cc = basisMcpCommit();
+        var countAfter = basisMcpSafeNum(function () { return Model.Count; }, null);
+        out.steps.push({
+          step: "object_copy", err: null,
+          countBefore: countBefore, countAfter: countAfter, committed: cc,
+          copyName: basisMcpSafeStr(function () { return cp.Name; }, null)
+        });
+        if (cp) { try { DeleteObject(cp); } catch (eDel) { /* final commit below */ } }
+      } catch (eCp) {
+        out.steps.push({ step: "object_copy", err: String(eCp) });
+      }
+    } else {
+      out.steps.push({ step: "object_copy", err: "no Copy method (typeof=" + out.methodScan.object.Copy + ")" });
+    }
+
+    /* ---- Butts collection access API (diagnostics) ---- */
+    var bcol = null;
+    try { bcol = panel.Butts; } catch (eB) { bcol = null; }
+    if (bcol) {
+      out.buttsApi.methods = scanMethods(bcol, ["Item", "ByIndex", "Count"]);
+      var bRead = {};
+      try { var b0 = bcol[0]; bRead.bracket0 = b0 ? "ok" : "empty"; } catch (eIdx) { bRead.bracket0 = "error"; }
+      try { var b1 = bcol.Item(0); bRead.item0 = b1 ? "ok" : "empty"; } catch (eItem) { bRead.item0 = "error"; }
+      out.buttsApi.access = bRead;
+    }
+
+    /* ---- cleanup ---- */
+    DeleteObject(panel);
+    var committedEnd = basisMcpCommit();
+    out.committedStart = committedStart;
+    out.committedEnd = committedEnd;
+    return out;
+  },
+
   add_cut: function (p) {
     if (!p || !p.path) throw new Error("add_cut requires path");
     if (!p.profile) throw new Error("add_cut requires profile (path to .frw section)");
@@ -540,8 +735,13 @@ var BASIS_MCP_HANDLERS = {
     if (!p || !p.path) throw new Error("delete_object requires path");
     var obj = basisMcpFindByPath(p.path);
     if (!obj) throw new Error("object not found by path");
+    var nm = basisMcpSafeStr(function () { return obj.Name; }, null) || "";
+    /* Guard: never remove service/foreign objects by accident. */
+    if (String(nm).toLowerCase() === "\u0433\u0430\u0431\u0430\u0440\u0438\u0442\u043d\u0430\u044f \u0440\u0430\u043c\u043a\u0430" && p.force !== true) {
+      throw new Error("refusing to delete service object '" + nm + "' (send force:true to override)");
+    }
     DeleteObject(obj);
-    return { deleted: true, committed: basisMcpCommit(), path: p.path };
+    return { deleted: true, committed: basisMcpCommit(), path: p.path, name: nm };
   },
 
   model_commit: function () {
