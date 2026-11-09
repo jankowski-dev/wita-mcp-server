@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.5.5";
+var BASIS_MCP_VERSION = "0.5.6";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -361,6 +361,26 @@ var BASIS_MCP_HANDLERS = {
     info.height = basisMcpSafeNum(function () { return obj.Height; }, null);
     info.depth = basisMcpSafeNum(function () { return obj.Depth; }, null);
     return info;
+  },
+
+  add_cut: function (p) {
+    if (!p || !p.path) throw new Error("add_cut requires path");
+    if (!p.profile) throw new Error("add_cut requires profile (path to .frw section)");
+    var obj = basisMcpFindByPath(p.path);
+    if (!obj) throw new Error("object not found by path");
+    var cut;
+    if (p.name) cut = obj.AddCut(String(p.name));
+    else cut = obj.Cuts.Add();
+    if (!cut) throw new Error("cut was not created");
+    var L = p.line || {};
+    cut.Trajectory.AddLine(Number(L.x1 || 0), Number(L.y1 || 0), Number(L.x2 || 0), Number(L.y2 || 0));
+    cut.Contour.Load(String(p.profile));
+    if (p.moveX !== undefined || p.moveY !== undefined) {
+      cut.Contour.Move(Number(p.moveX || 0), Number(p.moveY || 0));
+    }
+    obj.Build();
+    var committed = basisMcpCommit();
+    return { cut: true, committed: committed, name: p.name || null, line: L };
   },
 
   holes_info: function (p) {
