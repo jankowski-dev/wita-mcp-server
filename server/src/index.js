@@ -194,10 +194,12 @@ server.registerTool(
   {
     title: "Выполнить команду в БАЗИС",
     description:
-      "Отправляет команду резидентному worker'у в БАЗИС и ждёт результат. ВАЖНО: worker исполняет очередь, " +
-      "когда пользователь нажимает кнопку BasisMCP (Shift+1) на панели параметров БАЗИС. Если ответ не пришёл — " +
-      "попросите пользователя нажать кнопку и повторите вызов. Операции: ping, get_active_file, get_model_summary, " +
-      "get_selection, add_panel, set_panel_material, delete_object, worker_stop.",
+      "Отправляет команду резидентному worker'у в БАЗИС и ждёт результат. Worker исполняет очередь сам. " +
+      "Если статус worker'а не listening (basis_status) — попросите пользователя запустить «Скрипты → 0_BasisMCP_worker». " +
+      "На «unknown op» — тоже рестарт: worker старой версии. Операции (v0.6.1): ping, get_active_file, get_model_summary, " +
+      "get_selection, object_info, list_materials, add_panel, set_panel_material, batch_set_material, rename_object, " +
+      "delete_object (guard «Габаритная рамка» → force), add_cut, holes_info, object_move, resize_panel, copy_object, " +
+      "enable_butt_picker, add_butt, open_furniture, mount_furniture, mount_scheme, edit_probe, model_commit, worker_stop.",
     inputSchema: {
       op: z.string().min(1).describe("Имя операции, например ping / get_model_summary / add_panel"),
       params: z.record(z.any()).optional().describe("Параметры операции"),
@@ -224,7 +226,9 @@ server.registerTool(
   async ({ maxDepth, includeSizes }) => {
     const result = await sendCommand(
       "get_model_summary",
-      { maxDepth: maxDepth ?? 4, includeSizes: includeSizes ?? true },
+      /* worker's own param name is includePanelInfo; includeSizes is the
+       * tool alias kept for catalog compatibility */
+      { maxDepth: maxDepth ?? 4, includePanelInfo: includeSizes ?? true },
       30_000,
     );
     return text(result);
