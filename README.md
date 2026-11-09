@@ -76,6 +76,7 @@ MCP-сервер, который даёт ИИ-агенту (OpenCode и люб�
 | `docs/WORKFLOW.md` | ежедневный процесс |
 | `docs/DESIGN-RULES.md` | правила проектирования мебели (собираются с экспертом) |
 | `research/NOTES.md` | журнал исследований и инцидентов |
+| **`wita-mcp-knowledge`** | **скиллы агента** (design rules, MCP usage, engine, generator) — отдельный репозиторий |
 
 ## Безопасность
 

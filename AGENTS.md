@@ -65,6 +65,19 @@ OpenCode ──MCP(stdio)── server/src/index.js
 | `docs/` | архитектура, операции, уроки движка, workflow, правила проектирования |
 | `research/NOTES.md` | живой журнал исследований и инцидентов |
 
+## Связанные репозитории
+
+| Репозиторий | Назначение |
+|---|---|
+| `wita-mcp-server` (этот) | «руки»: код MCP-сервера и worker'а |
+| `wita-mcp-knowledge` | «правила и факты»: скиллы (`furniture-design`, `basis-mcp`, `basis-engine`, `wardrobe-generator`) + будущий RAG (`kb_search`) |
+
+Скиллы подключаются в `opencode.json`:
+
+```jsonc
+{ "skills": ["C:\\path\\to\\wita-mcp-knowledge\\skills"] }
+```
+
 ## Порядок работы агента
 
 1. Прочитай `docs/ARCHITECTURE.md` и `docs/OPERATIONS.md`.
