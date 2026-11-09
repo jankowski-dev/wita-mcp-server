@@ -62,7 +62,8 @@ OpenCode ──MCP(stdio)── server/src/index.js
 | `bridge/basis_mcp_worker_stop.js` | стоп (деплой как `1_BasisMCP_stop.js`) |
 | `bridge/basis_mcp_probe.js` | диагностика движка |
 | `tools/install-worker.ps1` | установка скриптов в папку БАЗИС |
-| `docs/` | архитектура, операции, уроки движка, workflow, правила проектирования |
+| `docs/` | архитектура, операции, уроки движка, workflow, правила проектирования, установка |
+| `docs/INSTALL.md` | полная установка MCP + worker + скиллов (новый ПК) |
 | `research/NOTES.md` | живой журнал исследований и инцидентов |
 
 ## Связанные репозитории
@@ -91,10 +92,13 @@ OpenCode ──MCP(stdio)── server/src/index.js
 
 ## Проверка после клонирования на новом ПК
 
+Полная инструкция: **`docs/INSTALL.md`** (MCP-сервер, worker, скиллы).
+Кратко:
+
 ```powershell
 cd server; npm install
-# конфиг: скопировать opencode.example.json → opencode.json
-#   и прописать АБСОЛЮТНЫЕ пути: node.exe и <repo>\server\src\index.js
-# запустить БАЗИС → «Скрипты» → 0_BasisMCP_worker (после tools/install-worker.ps1)
-# в OpenCode: basis_status → worker-listening; basis_execute ping → pong
+powershell -ExecutionPolicy Bypass -File ..\tools\install-worker.ps1
+# opencode.json: mcp.servers.basis (абсолютные пути) + "skills": ["...\\wita-mcp-knowledge\\skills"]
+# БАЗИС → «Скрипты» → 0_BasisMCP_worker
+# OpenCode: basis_status → worker-listening; basis_execute ping → pong
 ```

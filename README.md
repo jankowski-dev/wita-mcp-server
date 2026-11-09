@@ -22,38 +22,16 @@ MCP-сервер, который даёт ИИ-агенту (OpenCode и люб�
 | Пакетно | массовая замена материала с dry-run |
 | Группировка | блоки (`BeginBlock/EndBlock`) — в дорожной карте |
 
-## Установка (новый ПК)
+## Установка
 
-1. **БАЗИС**: скопировать скрипты в папку скриптов (автоматически):
+Полная пошаговая инструкция (MCP + worker + скиллы, второй ПК):
+**[docs/INSTALL.md](docs/INSTALL.md)**. Кратко:
 
-   ```powershell
-   git clone https://github.com/jankowski-dev/wita-mcp-server.git
-   cd wita-mcp-server
-   powershell -ExecutionPolicy Bypass -File tools\install-worker.ps1
-   ```
-
-2. **MCP-сервер**:
-
-   ```powershell
-   cd server
-   npm install
-   ```
-
-3. **OpenCode**: скопировать `opencode.example.json` → `opencode.json` в корне
-   проекта и **прописать абсолютные пути** к `node.exe` и `server/src/index.js`
-   (относительные пути OpenCode пока не поддерживает; `BASIS_MCP_DIR` по умолчанию
-   `C:\Users\Public\basis-mcp`). OpenCode подхватывает конфиг на лету.
-
-4. **БАЗИС**: открыть модель → меню **«Скрипты» → `0_BasisMCP_worker`**.
-   В статус-строке появится `🟢 AI Active`.
-
-5. Проверка в OpenCode:
-
-   ```text
-   basis_status            → status: worker-listening
-   basis_execute ping      → { pong: true }
-   basis_model_summary     → дерево модели
-   ```
+1. Склонировать репозиторий и `npm install` в `server/`.
+2. `tools\install-worker.ps1` — скопирует скрипты в папку БАЗИС.
+3. `opencode.json`: сервер `basis` (абсолютные пути) + `"skills": ["<путь>\\wita-mcp-knowledge\\skills"]`.
+4. БАЗИС → «Скрипты» → `0_BasisMCP_worker`.
+5. Проверка: `basis_status` → `worker-listening`.
 
 ## Быстрый старт
 
