@@ -109,9 +109,12 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```powershell
 cd C:\Tools\wita-mcp-knowledge\kb-server
 npm install
+node fetch-docs.js
 npm run index
 ```
 
+- `fetch-docs.js` скачивает официальные руководства БАЗИС (PDF/HTML) и статью
+  SAPR.ru в `kb/sources/local-docs/` (локально, в `.gitignore`).
 - Модель эмбеддингов `Xenova/multilingual-e5-small` скачивается один раз (~120 МБ).
 - Индексируются `skills/` и `kb/sources/` (см. `kb/kb.config.json`).
 - Дополнительные каталоги: `npm run index -- --extra "C:/path/to/docs"`.
