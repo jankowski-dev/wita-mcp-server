@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.5.7";
+var BASIS_MCP_VERSION = "0.5.8";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -459,11 +459,14 @@ var BASIS_MCP_HANDLERS = {
   /* Experimental battery on a scratch panel: what the old API allows for
    * move / resize / copy of an EXISTING panel. Cleans up after itself. */
   edit_probe: function () {
-    var out = { steps: [], methodScan: {}, buttsApi: {} };
+    var out = { steps: [], methodScan: {}, buttsApi: {}, notes: [] };
     var panel = AddFrontPanel(0, 0, 100, 50, 100);
     if (!panel) throw new Error("probe panel was not created");
     try { panel.Name = "MCP-EditProbe"; } catch (eN) { /* keep default */ }
     var committedStart = basisMcpCommit();
+    /* RULE: wrappers die at Commit - take a living one from the tree */
+    panel = basisMcpFindByPath([String("MCP-EditProbe")]);
+    if (!panel) throw new Error("probe panel lost after commit");
 
     function geo(o) {
       var g = {};
@@ -472,11 +475,14 @@ var BASIS_MCP_HANDLERS = {
       return g;
     }
     function step(name, fn) {
+      var marker = "?";
       try {
+        if (typeof Undo !== "undefined" && Undo && typeof Undo.Changing === "function") { Undo.Changing(panel); marker = "undo"; }
+        else if (typeof Action !== "undefined" && Action && typeof Action.StartEditing === "function") { Action.StartEditing(panel); marker = "startEditing"; }
         fn();
-        out.steps.push({ step: name, err: null, after: geo(panel) });
+        out.steps.push({ step: name, marker: marker, err: null, after: geo(panel) });
       } catch (e) {
-        out.steps.push({ step: name, err: String(e) });
+        out.steps.push({ step: name, marker: marker, err: String(e) });
       }
     }
     function scanMethods(obj, names) {
@@ -519,19 +525,22 @@ var BASIS_MCP_HANDLERS = {
       panel.Contour = nc2;
     });
 
-    /* ---- copy candidates ---- */
+    /* ---- copy candidates (create -> inspect -> delete pending, no commit) ---- */
     if (out.methodScan.object.Copy === "function") {
       try {
-        var countBefore = basisMcpSafeNum(function () { return Model.Count; }, null);
         var cp = panel.Copy();
-        var cc = basisMcpCommit();
-        var countAfter = basisMcpSafeNum(function () { return Model.Count; }, null);
-        out.steps.push({
-          step: "object_copy", err: null,
-          countBefore: countBefore, countAfter: countAfter, committed: cc,
-          copyName: basisMcpSafeStr(function () { return cp.Name; }, null)
-        });
-        if (cp) { try { DeleteObject(cp); } catch (eDel) { /* final commit below */ } }
+        if (cp) {
+          out.steps.push({
+            step: "object_copy", err: null,
+            copyName: basisMcpSafeStr(function () { return cp.Name; }, null),
+            copyGmin: geo(cp).gmin,
+            copyGmax: geo(cp).gmax
+          });
+          try { DeleteObject(cp); out.steps.push({ step: "object_copy_cleanup", err: null }); }
+          catch (eDelCp) { out.steps.push({ step: "object_copy_cleanup", err: String(eDelCp) }); }
+        } else {
+          out.steps.push({ step: "object_copy", err: "Copy() returned null" });
+        }
       } catch (eCp) {
         out.steps.push({ step: "object_copy", err: String(eCp) });
       }
@@ -551,7 +560,12 @@ var BASIS_MCP_HANDLERS = {
     }
 
     /* ---- cleanup ---- */
-    DeleteObject(panel);
+    try {
+      DeleteObject(panel);
+      out.deletedScratch = true;
+    } catch (eDelLast) {
+      out.deletedScratch = String(eDelLast);
+    }
     var committedEnd = basisMcpCommit();
     out.committedStart = committedStart;
     out.committedEnd = committedEnd;
