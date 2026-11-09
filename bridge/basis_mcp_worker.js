@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.5.8";
+var BASIS_MCP_VERSION = "0.5.9";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -456,119 +456,139 @@ var BASIS_MCP_HANDLERS = {
     };
   },
 
-  /* Experimental battery on a scratch panel: what the old API allows for
-   * move / resize / copy of an EXISTING panel. Cleans up after itself. */
+  /* Probe v2: same battery, but every mutation is COMMITTED, the panel is
+   * re-looked-up by name (wrappers die at commit), geometry re-read, then
+   * reverted (commit + confirm). Establishes: global vs local coords, and
+   * which primitives really work: Position set / Translate / Contour.Move /
+   * Contour.Clear+AddRectangle / Clone. */
   edit_probe: function () {
-    var out = { steps: [], methodScan: {}, buttsApi: {}, notes: [] };
-    var panel = AddFrontPanel(0, 0, 100, 50, 100);
-    if (!panel) throw new Error("probe panel was not created");
-    try { panel.Name = "MCP-EditProbe"; } catch (eN) { /* keep default */ }
-    var committedStart = basisMcpCommit();
-    /* RULE: wrappers die at Commit - take a living one from the tree */
-    panel = basisMcpFindByPath([String("MCP-EditProbe")]);
-    if (!panel) throw new Error("probe panel lost after commit");
+    var out = { steps: [], methodScan: {}, notes: [] };
+    out.notes.push("each mutation: marker -> mutate -> commit -> refetch -> read -> revert -> commit -> confirm");
 
-    function geo(o) {
+    function markChanged(o) {
+      try {
+        if (typeof Undo !== "undefined" && Undo && typeof Undo.Changing === "function") { Undo.Changing(o); return "undo"; }
+      } catch (eU) { /* fallthrough */ }
+      try {
+        if (typeof Action !== "undefined" && Action && typeof Action.StartEditing === "function") { Action.StartEditing(o); return "startEditing"; }
+      } catch (eS) { /* fallthrough */ }
+      return "none";
+    }
+    function refetch() {
+      var o = basisMcpFindByPath(["MCP-EditProbe"]);
+      if (!o) throw new Error("probe panel lost");
+      return o;
+    }
+    function geoOf(o) {
       var g = {};
       try { var gm = o.GMin; g.gmin = { x: Number(gm.x), y: Number(gm.y), z: Number(gm.z) }; } catch (e1) { g.gmin = null; }
       try { var gx = o.GMax; g.gmax = { x: Number(gx.x), y: Number(gx.y), z: Number(gx.z) }; } catch (e2) { g.gmax = null; }
+      try { var ps = o.Position; g.pos = { x: Number(ps.x), y: Number(ps.y), z: Number(ps.z) }; } catch (e3) { g.pos = null; }
+      g.cw = basisMcpSafeNum(function () { return o.ContourWidth; }, null);
+      g.ch = basisMcpSafeNum(function () { return o.ContourHeight; }, null);
       return g;
     }
-    function step(name, fn) {
-      var marker = "?";
-      try {
-        if (typeof Undo !== "undefined" && Undo && typeof Undo.Changing === "function") { Undo.Changing(panel); marker = "undo"; }
-        else if (typeof Action !== "undefined" && Action && typeof Action.StartEditing === "function") { Action.StartEditing(panel); marker = "startEditing"; }
-        fn();
-        out.steps.push({ step: name, marker: marker, err: null, after: geo(panel) });
-      } catch (e) {
-        out.steps.push({ step: name, marker: marker, err: String(e) });
-      }
-    }
-    function scanMethods(obj, names) {
+    function scanProbeMethods(obj, names) {
       var res = {};
       for (var i = 0; i < names.length; i++) {
         try { res[names[i]] = typeof obj[names[i]]; } catch (eScan) { res[names[i]] = "error"; }
       }
       return res;
     }
-
-    var g0 = geo(panel);
-    out.steps.push({ step: "base", err: null, after: g0 });
-
-    /* ---- move candidates ---- */
-    out.methodScan.object = scanMethods(panel, ["Copy", "Clone", "Duplicate", "Mirror", "Move", "Move1", "Translate", "SetPosition", "StartEditing"]);
-    try { out.methodScan.positionType = typeof panel.Position; } catch (ePos) { out.methodScan.positionType = "error"; }
-
-    step("position_set", function () {
-      panel.Position = NewVector(20, 10, 5);
-    });
-    step("contour_move_xy", function () {
-      panel.Contour.Move(20, 10);
-    });
-    step("contour_move_xyz", function () {
-      panel.Contour.Move(5, 0, 30);
-    });
-
-    /* ---- resize candidates ---- */
-    if (panel.Contour) {
-      out.methodScan.contour = scanMethods(panel.Contour, ["Move", "Rotate", "AddLine", "AddRectangle", "Clear", "Delete", "Remove", "Scale", "Item", "ByIndex"]);
-    }
-    step("contour_assign_bigger", function () {
-      var nc = NewContour();
-      nc.AddRectangle(0, 0, 160, 60);
-      panel.Contour = nc;
-    });
-    step("contour_assign_restore", function () {
-      var nc2 = NewContour();
-      nc2.AddRectangle(0, 0, 100, 50);
-      panel.Contour = nc2;
-    });
-
-    /* ---- copy candidates (create -> inspect -> delete pending, no commit) ---- */
-    if (out.methodScan.object.Copy === "function") {
+    /* one mutation: marker -> mutate -> commit -> refetch -> read (+revert) */
+    function mutate(name, fn, revertFn) {
+      var entry = { step: name, marker: "?", err: null };
       try {
-        var cp = panel.Copy();
-        if (cp) {
-          out.steps.push({
-            step: "object_copy", err: null,
-            copyName: basisMcpSafeStr(function () { return cp.Name; }, null),
-            copyGmin: geo(cp).gmin,
-            copyGmax: geo(cp).gmax
-          });
-          try { DeleteObject(cp); out.steps.push({ step: "object_copy_cleanup", err: null }); }
-          catch (eDelCp) { out.steps.push({ step: "object_copy_cleanup", err: String(eDelCp) }); }
-        } else {
-          out.steps.push({ step: "object_copy", err: "Copy() returned null" });
+        entry.marker = markChanged(refetch());
+        fn();
+        basisMcpCommit();
+        var o = refetch();
+        entry.after = geoOf(o);
+        if (revertFn) {
+          entry.revert = { marker: "?", err: null };
+          try {
+            entry.revert.marker = markChanged(o);
+            revertFn(o);
+            basisMcpCommit();
+            entry.revert.after = geoOf(refetch());
+          } catch (eRv) { entry.revert.err = String(eRv); }
         }
-      } catch (eCp) {
-        out.steps.push({ step: "object_copy", err: String(eCp) });
+      } catch (e) {
+        entry.err = String(e);
+        try { basisMcpCommit(); } catch (eC) { entry.err += " | commit: " + eC; }
       }
-    } else {
-      out.steps.push({ step: "object_copy", err: "no Copy method (typeof=" + out.methodScan.object.Copy + ")" });
+      out.steps.push(entry);
+      return basisMcpFindByPath(["MCP-EditProbe"]);
     }
 
-    /* ---- Butts collection access API (diagnostics) ---- */
-    var bcol = null;
-    try { bcol = panel.Butts; } catch (eB) { bcol = null; }
-    if (bcol) {
-      out.buttsApi.methods = scanMethods(bcol, ["Item", "ByIndex", "Count"]);
-      var bRead = {};
-      try { var b0 = bcol[0]; bRead.bracket0 = b0 ? "ok" : "empty"; } catch (eIdx) { bRead.bracket0 = "error"; }
-      try { var b1 = bcol.Item(0); bRead.item0 = b1 ? "ok" : "empty"; } catch (eItem) { bRead.item0 = "error"; }
-      out.buttsApi.access = bRead;
-    }
-
-    /* ---- cleanup ---- */
+    var panel = AddFrontPanel(520, 40, 620, 90, 330);
+    if (!panel) throw new Error("probe panel was not created");
+    try { panel.Name = "MCP-EditProbe"; } catch (eN) { /* keep default */ }
+    out.committedStart = basisMcpCommit();
     try {
-      DeleteObject(panel);
-      out.deletedScratch = true;
-    } catch (eDelLast) {
-      out.deletedScratch = String(eDelLast);
+      var base = refetch();
+      out.base = geoOf(base);
+      out.methodScan = {
+        object: scanProbeMethods(base, ["Copy", "Clone", "Duplicate", "Mirror", "Move", "Move1", "Translate", "SetPosition"]),
+        contour: scanProbeMethods(base.Contour, ["Move", "Rotate", "AddLine", "AddRectangle", "Clear", "Delete", "Remove", "Scale", "Item", "ByIndex"])
+      };
+
+      panel = mutate("position_set", function () {
+        var o = basisMcpFindByPath(["MCP-EditProbe"]);
+        o.Position = NewVector(550, 70, 335);
+      });
+
+      panel = mutate("translate_dx", function () {
+        var o = basisMcpFindByPath(["MCP-EditProbe"]);
+        o.Translate(30, 0, 0);
+      }, function (o) {
+        o.Translate(-30, 0, 0);
+      });
+
+      panel = mutate("contour_move_dx", function () {
+        var o = basisMcpFindByPath(["MCP-EditProbe"]);
+        o.Contour.Move(30, 0);
+      }, function (o) {
+        o.Contour.Move(-30, 0);
+      });
+
+      panel = mutate("contour_clear_addrect", function () {
+        var o = basisMcpFindByPath(["MCP-EditProbe"]);
+        o.Contour.Clear();
+        o.Contour.AddRectangle(0, 0, 160, 60);
+      }, function (o) {
+        o.Contour.Clear();
+        o.Contour.AddRectangle(0, 0, 100, 50);
+      });
+
+      if (out.methodScan.object.Clone === "function") {
+        var cEntry = { step: "clone", err: null };
+        try {
+          var cp = panel.Clone();
+          if (cp) {
+            cEntry.clone = {
+              name: basisMcpSafeStr(function () { return cp.Name; }, null),
+              geo: geoOf(cp)
+            };
+            try { DeleteObject(cp); cEntry.cleanup = true; }
+            catch (eDelCp) { cEntry.cleanup = String(eDelCp); }
+          } else { cEntry.err = "Clone() returned null"; }
+        } catch (eCl) { cEntry.err = String(eCl); }
+        out.steps.push(cEntry);
+      } else {
+        out.steps.push({ step: "clone", err: "no Clone method" });
+      }
+
+      panel = refetch();
+      out.finalGeo = geoOf(panel);
+    } finally {
+      try {
+        DeleteObject(basisMcpFindByPath(["MCP-EditProbe"]));
+        out.deletedScratch = true;
+      } catch (eDel) { out.deletedScratch = String(eDel); }
+      try { basisMcpCommit(); } catch (eCF) { out.deletedScratch += " (commit: " + eCF + ")"; }
+      out.committedEnd = true;
     }
-    var committedEnd = basisMcpCommit();
-    out.committedStart = committedStart;
-    out.committedEnd = committedEnd;
     return out;
   },
 
