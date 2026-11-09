@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.6.0  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.2  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.1";
+var BASIS_MCP_VERSION = "0.6.2";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -877,6 +877,15 @@ var BASIS_MCP_HANDLERS = {
     var th = basisMcpSafeNum(function () { return src.Thickness; }, null) || 16;
     var mat = basisMcpSafeStr(function () { return src.MaterialName; }, null);
     var buttCount = basisMcpSafeNum(function () { return src.Butts.Count; }, null);
+    /* READ BUTT MATERIALS NOW: the src wrapper dies at any Commit (incl.
+     * the one inside add_panel below). Butt exposes Material/Thickness/
+     * Width only - no side info (probed), sides come via buttElems. */
+    var srcButts = [];
+    for (var bi = 0; bi < (buttCount || 0); bi++) {
+      var btRead = null;
+      try { btRead = src.Butts[bi]; } catch (eBi) { btRead = null; }
+      srcButts.push(btRead ? basisMcpSafeStr(function () { return btRead.Material; }, null) : null);
+    }
 
     /* orientation: explicit param wins; otherwise infer from the LOCAL
      * thickness axis (front: z, horiz: y, vert: x) */
@@ -924,16 +933,46 @@ var BASIS_MCP_HANDLERS = {
     if (!fresh) throw new Error("recreated panel not found in tree: " + newName);
     var after = basisMcpGeoOf(fresh);
     var aligned = after.cw === cw && after.ch === ch;
+
+    /* butts: only with an explicit buttElems array (one contour elem
+     * number per source butt, in source Butts order). Without it side
+     * info is unknowable (probed) - no silent guessing. */
+    var buttPlan = (p.buttElems && p.buttElems.length !== undefined) ? p.buttElems : null;
+    var buttResults = [];
+    var buttsCommitError = null;
+    if (buttPlan && buttPlan.length > 0 && srcButts.length > 0) {
+      for (var bj = 0; bj < buttPlan.length; bj++) {
+        var sideNo = Number(buttPlan[bj]);
+        var bMat = srcButts[bj];
+        var bEntry = { index: bj, material: bMat, elem: sideNo, ok: false };
+        if (bMat) {
+          try {
+            var bInp = NewButtMaterialInput("BasisMCP.copy");
+            try { bInp.Name = bMat; } catch (eBN) { /* fallthrough */ }
+            try { bInp.Material = bMat; } catch (eBM) { /* fallthrough */ }
+            bEntry.ok = !!fresh.AddButt(bInp, sideNo);
+          } catch (eBa) { bEntry.error = String(eBa); }
+        }
+        buttResults.push(bEntry);
+      }
+      try { basisMcpCommit(); } catch (eBCom) { buttsCommitError = String(eBCom); }
+      fresh = basisMcpRefetchByName(newName);
+      after = basisMcpGeoOf(fresh);
+    }
+
     return {
       copied: aligned,
       strategy: "recreate",
       source: srcName,
       name: newName,
       orientation: orientation,
-      sourceGeo: { pos: pos, cw: cw, ch: ch, thickness: th, material: mat, butts: buttCount },
+      sourceGeo: { pos: pos, cw: cw, ch: ch, thickness: th, material: mat, butts: buttCount, buttsMaterial: srcButts },
       after: after,
-      buttsSkipped: buttCount,
-      note: "butts are NOT copied - re-add with add_butt (side info unavailable)"
+      buttsApplied: buttResults.length,
+      buttsResults: buttResults,
+      buttsAfter: after.butts,
+      buttsCommitError: buttsCommitError,
+      note: buttPlan ? null : "butts NOT copied - pass buttElems (contour elem per source butt order) to transfer them"
     };
   },
 
@@ -1008,9 +1047,24 @@ var BASIS_MCP_HANDLERS = {
     if (matParam === "__picked__") {
       if (!BASIS_MCP_BUTT_INPUT) throw new Error("no picked material: call enable_butt_picker first, pick a banding, then re-run");
       buttObj = panel.AddButt(BASIS_MCP_BUTT_INPUT, Number(p.elem));
+    } else if (typeof matParam === "object" && matParam !== null) {
+      /* direct ButtMaterialInput passed by the agent (rare) */
+      buttObj = panel.AddButt(matParam, Number(p.elem));
     } else {
-      /* String names silently no-op for panel material (tested 20:00) - kept for experiments. */
-      buttObj = panel.AddButt(String(matParam), Number(p.elem));
+      /* PROBED (v0.6.1): NewButtMaterialInput + Name/Material = full edge
+       * material name (with \r and DB code, e.g. taken from list_materials)
+       * resolves the material engine-side (thickness/width come out right).
+       * The string-only AddButt(name) silently no-ops - never use it. */
+      var full = String(matParam);
+      var inp = null;
+      try { inp = NewButtMaterialInput("BasisMCP.butt"); } catch (eInp) { inp = null; }
+      if (inp) {
+        try { inp.Name = full; } catch (eNam) { /* fallthrough */ }
+        try { inp.Material = full; } catch (eMat) { /* fallthrough */ }
+        buttObj = panel.AddButt(inp, Number(p.elem));
+      } else {
+        buttObj = panel.AddButt(full, Number(p.elem));
+      }
     }
     var readback = {};
     if (buttObj) {
