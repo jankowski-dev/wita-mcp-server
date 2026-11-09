@@ -104,6 +104,22 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 Копирует скиллы в `%USERPROFILE%\.config\opencode\skills` — доступны во всех
 проектах. Обновление: `git pull` + повторный запуск `install.ps1`.
 
+## 5a. RAG-сервер базы знаний (`kb`)
+
+```powershell
+cd C:\Tools\wita-mcp-knowledge\kb-server
+npm install
+npm run index
+```
+
+- Модель эмбеддингов `Xenova/multilingual-e5-small` скачивается один раз (~120 МБ).
+- Индексируются `skills/` и `kb/sources/` (см. `kb/kb.config.json`).
+- Дополнительные каталоги: `npm run index -- --extra "C:/path/to/docs"`.
+- Подключение в `opencode.json` — сервер `kb` (см. `opencode.example.json`).
+- Инструменты: `kb_search(query, topK)`, `kb_stats()`.
+- Индекс: `kb/index/index.json` (в `.gitignore`); после переиндексации
+  перезапустить MCP-сервер (`/reload`) или OpenCode.
+
 ## 6. Первый запуск
 
 1. Откройте БАЗИС-Мебельщик, вкладку «Мебельщик», модель.

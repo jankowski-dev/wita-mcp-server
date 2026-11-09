@@ -11,7 +11,15 @@
         "environment": {
           "BASIS_MCP_DIR": "C:\\Users\\Public\\basis-mcp"
         }
+      },
+      "kb": {
+        "type": "local",
+        "command": [
+          "C:\\Program Files\\nodejs\\node.exe",
+          "C:\\path\\to\\wita-mcp-knowledge\\kb-server\\src\\index.js"
+        ]
       }
     }
-  }
+  },
+  "skills": ["C:\\path\\to\\wita-mcp-knowledge\\skills"]
 }
