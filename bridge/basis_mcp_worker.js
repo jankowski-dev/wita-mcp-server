@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.5.4";
+var BASIS_MCP_VERSION = "0.5.5";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -360,6 +360,34 @@ var BASIS_MCP_HANDLERS = {
     info.width = basisMcpSafeNum(function () { return obj.Width; }, null);
     info.height = basisMcpSafeNum(function () { return obj.Height; }, null);
     info.depth = basisMcpSafeNum(function () { return obj.Depth; }, null);
+    return info;
+  },
+
+  holes_info: function (p) {
+    if (!p || !p.path) throw new Error("holes_info requires path");
+    var obj = basisMcpFindByPath(p.path);
+    if (!obj) throw new Error("object not found by path");
+    var info = { name: basisMcpSafeStr(function () { return obj.Name; }, null) };
+    try {
+      var holes = obj.Holes;
+      info.holes = basisMcpSafeNum(function () { return holes.Count; }, null);
+      if (info.holes && info.holes > 0) {
+        try {
+          var h0 = basisMcpChildOf(holes, 0);
+          info.first = {
+            diameter: basisMcpSafeNum(function () { return h0.Diameter; }, null),
+            depth: basisMcpSafeNum(function () { return h0.Depth; }, null),
+            x: basisMcpSafeNum(function () { return h0.Position.x; }, null),
+            y: basisMcpSafeNum(function () { return h0.Position.y; }, null),
+            z: basisMcpSafeNum(function () { return h0.Position.z; }, null),
+          };
+        } catch (eFirst) {
+          info.first = "n/a";
+        }
+      }
+    } catch (e) {
+      info.holes = "n/a";
+    }
     return info;
   },
 
