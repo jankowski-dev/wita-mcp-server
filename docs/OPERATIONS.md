@@ -1,6 +1,6 @@
 # Операции (белый список)
 
-Все операции вызываются через `basis_execute`:
+worker v0.6.1. Все операции вызываются через `basis_execute`:
 
 ```json
 { "op": "add_panel", "params": { "...": "..." }, "timeoutMs": 30000 }
@@ -18,6 +18,14 @@
 | `get_model_summary` | `maxDepth` (default 4), `includePanelInfo` | дерево: узлы `{name, type, path, fields|material/thickness/contourWidth/contourHeight/butts, children[]}` |
 | `get_selection` | — | `{selectedCount, items:[{path,name,type}]}` |
 | `object_info` | `path` | `{name, position:{x,y,z}, gmax, gmin, width,height,depth}` |
+| `list_materials` | — | срез материалов всех панелей, кромок и вырезов: `{panelCount, objectCount, materials[{key,count}], edges[{material,thickness,width,count,key}], cuts{total,names}}` |
+| `holes_info` | `path` | монтажные отверстия панели (диаметры/координаты/стороны) |
+
+Серверный алиас `basis_model_summary(includeSizes)` — это тот же `get_model_summary`; параметр фактически всегда «включено» (worker проверяет только `includePanelInfo === false`).
+
+**Верификация мутаций — только по `Position` и `ContourWidth/Height`** (probe v2):
+`gmin/gmax` — локальные и после правок не пересчитываются. `Position` и размеры контура
+отражают изменения достоверно. Контуры панелей всегда 0-based.
 
 ## Запись
 
@@ -26,9 +34,39 @@
 | `add_panel` | `orientation: front|horiz|vert`, `rect{x1,y1,x2,y2,depth}`, `name`, `materialName`, `thickness` | `{created, committed, name, material, thickness}` |
 | `set_panel_material` | `path` или `name`, `materialName`, `thickness` | `{updated, committed, material}` |
 | `rename_object` | `path`, `newName` | `{renamed, readback}` |
-| `delete_object` | `path` | `{deleted, committed, path}` |
+| `delete_object` | `path`, `force?` | `{deleted, committed, path}` — «Габаритная рамка» удаляется только при `force: true` |
 | `model_commit` | — | `{committed}` |
 | `batch_set_material` | `materialName`, `fromMaterial?`, `dryRun?` | `{changedCount, skippedCount, errorCount, changed[]}` |
+| `object_move` | `path`, `dx,dy,dz` | `{moved, marker, effective{x,y,z}, posBefore, posAfter}` — `Translate()`; верификация по дельте `Position` |
+| `resize_panel` | `path`, `width?`, `height?`, `anchorX?`, `anchorY?` | `{resized, requested, before, after}` — `Contour.Clear()+AddRectangle()` от якоря (по умолчанию 0,0); авто-откат при провале |
+| `copy_object` | `path`, `newName?`, `offset{dx,dy,dz}?`, `orientation?` | `{copied, strategy:"recreate", sourceGeo, after, buttsSkipped}` — пересоздание панели (см. примечание); но НЕ `Clone()` |
+| `add_cut` | `path`, `name?` | вырез: именованный (`AddCut(name)`) либо анонимный (`Cuts.Add()`) |
+| `add_cut` (геометрия) | `line{x1,y1,x2,y2}` | прямолинейная траектория |
+| `add_cut` (мультипойнт) | `points: [[x,y],...]` (≥2) | траектория цепочкой сегментов `i → i+1` |
+| `add_cut` (профиль) | `profile` (обязателен), `moveX?`, `moveY?` | профиль выреза (`Contour.Load`); результат: `{cut, committed, name, trajectory}` |
+
+### delete_object и дубликаты имён
+
+Поисковая выборка по имени (`path: ["Имя"]`) всегда возвращает **первый матч**, а в
+дереве типовой кухни имён-дубликатов десятки (крепёж «Евровинт 6х50» и т.п.).
+Удаление объекта → путь **индексами** из свежего `get_model_summary` (`[216]`).
+Минимальный безопасный сценарий: summary → найти индекс → `delete_object` по нему.
+
+### copy_object — recreate-стратегия (v0.6.1)
+
+`Clone()` работает только до коммита: после `Commit()` клон в дереве не появляется
+(батарея v0.6.0: Count 218→218, клона нет). Поэтому copy строится как
+пересоздание:
+
+1. Читаем источник: `Position`, `ContourWidth/Height`, `Thickness`, `MaterialName`.
+2. Ориентация — параметр `orientation` явно, либо вывод по локальной оси
+   толщины (z→front, y→horiz, x→vert).
+3. Имя копии — `newName` или «источник + copy», суффиксы 2, 3, … до уникальности.
+4. Офсет копии — `offset{dx,dy,dz}`, прибавляется к позиции; всё через `add_panel`.
+
+Кромки (**butts**) в копию не переносятся — пока нет достоверного чтения стороны
+(`elem`) из Butt-объекта. Кромку в копию добавлять отдельно: `add_butt`
+(`__picked__`), сторона — по правилам дизайна из скилла `furniture-design`.
 
 ### Система координат add_panel (важно!)
 
@@ -85,6 +123,7 @@ Mount(полка, боковина, x, y, z)
 | op | назначение |
 |---|---|
 | `worker_stop` | завершить сессию после текущего цикла |
+| `edit_probe` | диагностика движка на черновой панели (мутации + откаты, скан Schema Clone/Butt); чистит за собой |
 | `enable_butt_picker` / `model_commit` | см. выше |
 
 ## Ошибки
