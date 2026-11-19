@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.6.5  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.6  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.5";
+var BASIS_MCP_VERSION = "0.6.6";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -662,6 +662,79 @@ var BASIS_MCP_HANDLERS = {
     return out;
   },
 
+  /* Probe v6: 
+   * 1) Cuts collection access: [i] vs Item(i), per-Cut fields, CutType values.
+   * 2) Contour shaping tools: Rounding/RoundingEx/Facet/FacetEx/Symmetry/AddEquidistant.
+   */
+  probe_v6: function () {
+    var out = { cuts: null, contourShaping: {}, notes: [] };
+    function keysOf(o, n) { return o ? { prop: typeof o[n] } : null; }
+    var panel = AddFrontPanel(2300, 100, 2450, 200, 330);
+    if (!panel) throw new Error("probe panel not created");
+    try { panel.Name = "MCP-ProbeV6"; } catch (eN) {}
+    basisMcpCommit();
+    var p0 = basisMcpFindByPath(["MCP-ProbeV6"]);
+    var cut = p0.AddCut("V6-C");
+    cut.Contour.AddRectangle(0, 0, 50, 40);
+
+    var c0s = null; try { c0s = cut.Contour.Item(0); } catch (eC0a) {}
+    var cutFields = null;
+    try {
+      var keys = Object.getOwnPropertyNames(cut);
+      var owner = cut.Panel ? cut.Panel : null;
+      cutFields = {
+        keys: keys,
+        panelRef: owner ? "yes" : "null",
+        cutType: basisMcpSafeStr(function () { return cut.CutType; }, null),
+        cutMode: basisMcpSafeStr(function () { return cut.CutMode; }, null),
+        sign: basisMcpSafeStr(function () { return cut.Sign; }, null),
+        contourSide: basisMcpSafeStr(function () { return cut.ContourSide; }, null),
+        material: basisMcpSafeStr(function () { return cut.Material; }, null),
+        thickness: basisMcpSafeNum(function () { return cut.Thickness; }, null),
+        indexOfElem: basisMcpSafeNum(function () { return cut.IndexOfPanelElem; }, null)
+      };
+    } catch (eF) { cutFields = "err: " + String(eF).slice(0, 100); }
+    var cut0keys = [];
+    var o = cut;
+    for (var d = 0; d < 4 && o; d++) {
+      var ps = [];
+      try { ps = Object.getOwnPropertyNames(o); } catch (eP) {}
+      ps.forEach(function (n) { cut0keys.push(n); });
+      o = o.__proto__;
+    }
+    cut0keys = cut0keys.filter(function (n, i) { return cut0keys.indexOf(n) === i; });
+    out.cuts = {
+      count: p0.Cuts.Count,
+      itemFn: typeof p0.Cuts.Item,
+      bracket0: (function () { try { return p0.Cuts[0] ? "yes" : "null"; } catch (e) { return "err"; } })(),
+      item0: (function () { try { return p0.Cuts.Item(0) ? "yes" : "null"; } catch (e) { return "err"; } })(),
+      bracket1: (function () { try { return p0.Cuts[1] ? "yes" : "null"; } catch (e) { return "err"; } })(),
+      cutFields: cutFields,
+      cutOwnKeys: cut0keys
+    };
+
+    /* contour shaping: try calls; each guarded, revert not needed (scratch) */
+    function tryC(name, args) {
+      var entry = { name: name, result: null };
+      try {
+        entry.result = cut.Contour[name](args);
+      } catch (e) { entry.result = "err: " + String(e).slice(0, 80); }
+      out.contourShaping.push(entry);
+    }
+    out.contourShaping = [];
+    tryC("Rounding", 5);
+    tryC("Rounding", { radius: 3, cornerRadius: 3 });
+    tryC("RoundingEx", 3);
+    tryC("Facet", 5);
+    tryC("FacetEx", { size: 3 });
+    tryC("Symmetry", 5);
+    tryC("AddEquidistant", 5);
+    tryC("Elastic", 1.5);
+
+    try { DeleteObject(basisMcpFindByPath(["MCP-ProbeV6"])); basisMcpCommit(); } catch (eD) {}
+    return out;
+  },
+
   edit_probe: function () {
     var out = { steps: [], methodScan: {}, notes: [] };
     out.notes.push("each mutation: marker -> mutate -> commit -> refetch -> read -> revert -> commit -> confirm");
@@ -930,22 +1003,25 @@ var BASIS_MCP_HANDLERS = {
     } catch (e) {
       info.holes = "n/a";
     }
-    /* v0.6.5: cuts added via obj.AddCut - Panel.Holes not reflected. */
+    /* v0.6.5: cuts added via obj.AddCut - Panel.Holes not reflected.
+     * v0.6.6: iterate Cuts via [i] and Item(i). */
     try {
       info.cuts = basisMcpSafeNum(function () { return obj.Cuts.Count; }, null);
       if (info.cuts > 0) {
         info.cutList = [];
         for (var ci = 0; ci < info.cuts; ci++) {
-          var cut = basisMcpChildOf(obj.Cuts, ci);
+          var cut = null;
+          try { cut = obj.Cuts[ci]; } catch (eA1) { try { cut = obj.Cuts.Item(ci); } catch (eA2) { cut = null; } }
           if (!cut) continue;
           info.cutList.push({
             index: ci,
             name: basisMcpSafeStr(function () { return cut.Name; }, null),
             type: basisMcpSafeStr(function () { return cut.CutType; }, null),
-            material: basisMcpSafeStr(function () { return cut.Material; }, null),
-            thickness: basisMcpSafeNum(function () { return cut.Thickness; }, null),
+            mode: basisMcpSafeStr(function () { return cut.CutMode; }, null),
             sign: basisMcpSafeStr(function () { return cut.Sign; }, null),
-            contourSide: basisMcpSafeStr(function () { return cut.ContourSide; }, null)
+            contourSide: basisMcpSafeStr(function () { return cut.ContourSide; }, null),
+            material: basisMcpSafeStr(function () { return cut.Material; }, null),
+            thickness: basisMcpSafeNum(function () { return cut.Thickness; }, null)
           });
         }
       }
