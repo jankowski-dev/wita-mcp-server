@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.6.6  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.7  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.6";
+var BASIS_MCP_VERSION = "0.6.7";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -1326,6 +1326,46 @@ var BASIS_MCP_HANDLERS = {
       radius: p.radius !== undefined ? Number(p.radius) : (p.diameter !== undefined ? p.diameter / 2 : 5),
       name: p.name || null
     });
+  },
+
+  /* v0.6.7: remove cut by index or all. Worker-side delete (Cut has no
+   * visible Delete method - try c.Delete / list.Delete / DeleteObject). */
+  cut_delete: function (p) {
+    if (!p || !p.path) throw new Error("cut_delete requires path");
+    var obj = basisMcpFindByPath(p.path);
+    if (!obj) throw new Error("object not found by path");
+    if (basisMcpQuietBool(function () { return obj.Cuts === undefined; })) throw new Error("object has no Cuts");
+    var list = obj.Cuts;
+    var attempts = {};
+    var idx = p.index !== undefined ? Number(p.index) : null;
+    function delOne(c) {
+      if (!c) return false;
+      try { if (typeof c.Delete === "function") { c.Delete(); return true; } } catch (eD1) { attempts.cutDelete = "err:" + eD1; }
+      try { if (typeof list.Delete === "function") { list.Delete(idx); return true; } } catch (eD2) { attempts.listDelete = "err:" + eD2; }
+      try { DeleteObject(c); return true; } catch (eD3) { attempts.deleteObject = "err:" + eD3; }
+      return false;
+    }
+    var result = null;
+    if (p.all === true) {
+      var deleted = 0;
+      while (list.Count > 0 && deleted < 50) {
+        var c0 = list[0];
+        if (!delOne(c0)) { attempts.loop = "stuck"; break; }
+        deleted++;
+      }
+      result = { all: true, deleted: deleted, remaining: list.Count };
+    } else {
+      var c = idx !== null ? list[idx] : null;
+      if (!c) throw new Error("cut index out of range or empty");
+      result = { index: idx, name: basisMcpSafeStr(function () { return c.Name; }, null), ok: delOne(c) };
+    }
+    var committed = basisMcpCommit();
+    var fresh = basisMcpRefetchByName(obj.Name || "");
+    return {
+      cutDelete: true, committed: committed,
+      objCuts: fresh ? basisMcpSafeNum(function () { return fresh.Cuts.Count; }, null) : null,
+      result: result, attempts: attempts
+    };
   },
 
   open_furniture: function (p) {
