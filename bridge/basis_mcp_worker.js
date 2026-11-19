@@ -575,6 +575,93 @@ var BASIS_MCP_HANDLERS = {
     return out;
   },
 
+  /* Probe v5: real API surface scan — own properties + prototype chains
+   * for panel, its Cuts list, a new Cut, Contour, Butts (and the global
+   * class Object constructor for good measure). Read-only + scratch panel. */
+  probe_v5: function () {
+    var out = { panels: {}, cut: null, contour: {}, objClass: {}, globals: {}, cleanup: {}, notes: [] };
+
+    function keysDeep(obj, depth) {
+      var names = [];
+      var cur = obj;
+      var d = 0;
+      while (cur && d < depth) {
+        var ps = [];
+        try { ps = Object.getOwnPropertyNames(cur); } catch (e) { ps = ["<no-props>"]; }
+        ps.forEach(function (n) {
+          var dup = false;
+          names.forEach(function (m) { if (m === n) dup = true; });
+          if (!dup) names.push(n);
+        });
+        cur = cur.__proto__ || null;
+        d++;
+      }
+      return names;
+    }
+    function keysOf(obj) { return obj ? keysDeep(obj, 2) : ["<null>"]; }
+    function scrape(obj, names) {
+      var r = {};
+      (names || []).forEach(function (k) {
+        try {
+          var v = obj[k];
+          r[k] = typeof v;
+        } catch (e) { r[k] = "err"; }
+      });
+      return r;
+    }
+
+    var panel = AddFrontPanel(2300, 100, 2450, 200, 330);
+    if (!panel) throw new Error("probe panel not created");
+    try { panel.Name = "MCP-ProbeV5"; } catch (eN) { /* keep default */ }
+    basisMcpCommit();
+    var p0 = basisMcpFindByPath(["MCP-ProbeV5"]);
+
+    out.panels.panel = keysOf(p0);
+    out.panels.contour = keysOf(p0.Contour);
+    try {
+      out.panels.butts = keysOf(p0.Butts);
+      var b0 = p0.Butts.Count ? p0.Butts[0] : null;
+      out.panels.butt = keysOf(b0);
+    } catch (eB) { out.panels.butt = "err"; }
+
+    /* Is there a Cut for this panel? (AddCut in v0.6.2 works) */
+    try {
+      var cut = p0.AddCut("MCP-Cut-V5");
+      out.cut = {
+        created: !!cut,
+        count: p0.Cuts.Count,
+        cutKeys: keysOf(cut),
+        trajKeys: keysOf(cut.Trajectory),
+        contourKeys: keysOf(cut.Contour)
+      };
+      /* post-probe, try also a free Contour on a cut: rect+line probes */
+      try {
+        var co = cut.Trajectory;
+        out.cut.trajScrape = scrape(co, ["AddLine", "AddCircle", "AddArc", "AddPolyLine", "AddPolygon", "AddProfile", "Load", "Move"]);
+      } catch (eT) { out.cut.trajScrape = "err"; }
+      try {
+        var cc = cut.Contour;
+        out.cut.contourScrape = scrape(cc, ["AddLine", "AddRectangle", "Move", "Load", "Scale"]);
+      } catch (eC) { out.cut.contourScrape = "err"; }
+    } catch (eCUT) { out.cut = "err: " + String(eCUT).slice(0, 120); }
+
+    /* Global surface: Object + NewArea/NewContour (area constructor, as
+     * seen in guide examples) — whatever actually exists on the global. */
+    try {
+      var oKeys = [];
+      try { oKeys = Object.getOwnPropertyNames(Object.prototype); } catch (eOP) { oKeys = []; }
+      out.globals.objectPrototype = oKeys;
+    } catch (eObj) { out.globals.objectProto = "err"; }
+    try { out.globals.typeofNewArea = typeof NewArea; if (out.globals.typeofNewArea === "function") { out.globals.newAreaKeys = keysOf(NewArea); out.globals.areaKeys = keysOf(NewArea); } } catch (eNA) { out.globals.newArea = "err"; }
+    try { out.globals.typeofNewContour = typeof NewContour; if (out.globals.typeofNewContour === "function") { out.globals.newContourKeys = keysOf(NewContour); } } catch (eNC) { out.globals.newContour = "err"; }
+    out.globals.panelIsRealObject = basisMcpTypeOf(p0);
+
+    /* cleanup: whole scratch panel (and any cut children belong to it) */
+    try { DeleteObject(p0); } catch (eD) {}
+    try { basisMcpCommit(); out.cleanup.ok = true; } catch (eDC) { out.cleanup.err = String(eDC).slice(0, 100); }
+    return out;
+  },
+
   edit_probe: function () {
     var out = { steps: [], methodScan: {}, notes: [] };
     out.notes.push("each mutation: marker -> mutate -> commit -> refetch -> read -> revert -> commit -> confirm");
