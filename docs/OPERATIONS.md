@@ -1,6 +1,6 @@
 # Операции (белый список)
 
-worker v0.6.1. Все операции вызываются через `basis_execute`:
+worker v0.6.2. Все операции вызываются через `basis_execute`:
 
 ```json
 { "op": "add_panel", "params": { "...": "..." }, "timeoutMs": 30000 }
@@ -39,7 +39,7 @@ worker v0.6.1. Все операции вызываются через `basis_ex
 | `batch_set_material` | `materialName`, `fromMaterial?`, `dryRun?` | `{changedCount, skippedCount, errorCount, changed[]}` |
 | `object_move` | `path`, `dx,dy,dz` | `{moved, marker, effective{x,y,z}, posBefore, posAfter}` — `Translate()`; верификация по дельте `Position` |
 | `resize_panel` | `path`, `width?`, `height?`, `anchorX?`, `anchorY?` | `{resized, requested, before, after}` — `Contour.Clear()+AddRectangle()` от якоря (по умолчанию 0,0); авто-откат при провале |
-| `copy_object` | `path`, `newName?`, `offset{dx,dy,dz}?`, `orientation?` | `{copied, strategy:"recreate", sourceGeo, after, buttsSkipped}` — пересоздание панели (см. примечание); но НЕ `Clone()` |
+| `copy_object` | `path`, `newName?`, `offset{dx,dy,dz}?`, `orientation?`, `buttElems?: [0..3]` | `{copied, strategy:"recreate", source, name, orientation, sourceGeo, after, buttsApplied, buttsResults, buttsAfter, buttsCommitError}` — пересоздание панели (`Clone()` не работает после коммита); буты переносятся по `buttElems` (см. примечание) |
 | `add_cut` | `path`, `name?` | вырез: именованный (`AddCut(name)`) либо анонимный (`Cuts.Add()`) |
 | `add_cut` (геометрия) | `line{x1,y1,x2,y2}` | прямолинейная траектория |
 | `add_cut` (мультипойнт) | `points: [[x,y],...]` (≥2) | траектория цепочкой сегментов `i → i+1` |
@@ -63,11 +63,10 @@ worker v0.6.1. Все операции вызываются через `basis_ex
    толщины (z→front, y→horiz, x→vert).
 3. Имя копии — `newName` или «источник + copy», суффиксы 2, 3, … до уникальности.
 4. Офсет копии — `offset{dx,dy,dz}`, прибавляется к позиции; всё через `add_panel`.
-5. Кромки — только при явном `buttElems: [0,1,2,...]` (номер элемента контура для
-   каждого бутта источника, в порядке обхода `Butts`); сторона из Butt-объекта
-   не читается (probe v3: у него только Material/Thickness/Width). Материал
-   резолвится из имени (direct-material механизм v0.6.2). Без `buttElems`
-   кромки пропускаются — молчаливых догадок нет.
+5. Кромки — переносятся в копию через `buttElems` (номера элементов контура
+   источника в порядке обхода `Butts`; стороны Butt-объекта не читаются — probe
+   v3: у него только Material/Thickness/Width). Материал резолвится из
+   `Butt.Material` (direct-material механизм v0.6.2).
 
 ### Система координат add_panel (важно!)
 
