@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.6.4  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.5  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.4";
+var BASIS_MCP_VERSION = "0.6.5";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -930,6 +930,28 @@ var BASIS_MCP_HANDLERS = {
     } catch (e) {
       info.holes = "n/a";
     }
+    /* v0.6.5: cuts added via obj.AddCut — Panel.Holes их не отражает. */
+    try {
+      info.cuts = basisMcpSafeNum(function () { return obj.Cuts.Count; }, null);
+      if (info.cuts > 0) {
+        info.cutList = [];
+        for (var ci = 0; ci < info.cuts; ci++) {
+          var cut = basisMcpChildOf(obj.Cuts, ci);
+          if (!cut) continue;
+          info.cutList.push({
+            index: ci,
+            name: basisMcpSafeStr(function () { return cut.Name; }, null),
+            type: basisMcpSafeStr(function () { return cut.CutType; }, null),
+            material: basisMcpSafeStr(function () { return cut.Material; }, null),
+            thickness: basisMcpSafeNum(function () { return cut.Thickness; }, null),
+            sign: basisMcpSafeStr(function () { return cut.Sign; }, null),
+            contourSide: basisMcpSafeStr(function () { return cut.ContourSide; }, null)
+          });
+        }
+      }
+    } catch (eC) {
+      info.cuts = "n/a";
+    }
     return info;
   },
 
@@ -1140,6 +1162,94 @@ var BASIS_MCP_HANDLERS = {
       buttsCommitError: buttsCommitError,
       note: buttPlan ? null : "butts NOT copied - pass buttElems (contour elem per source butt order) to transfer them"
     };
+  },
+
+  /* pockets/holes — P1 on real engine API (probe_v5): Contour.AddRectangle/
+   * AddCircle/AddRoundRect + Panel.AddCut + Build. */
+  set_pocket: function (p) {
+    if (!p || !p.path) throw new Error("set_pocket requires path");
+    var obj = basisMcpFindByPath(p.path);
+    if (!obj) throw new Error("object not found by path");
+    if (basisMcpQuietBool(function () { return obj.Butts === undefined || obj.Contour === undefined; })) throw new Error("object is not a panel");
+    var kind = p.kind || "rect";
+    var cwBefore = basisMcpSafeNum(function () { return obj.ContourWidth; }, null);
+    var chBefore = basisMcpSafeNum(function () { return obj.ContourHeight; }, null);
+    var marker = basisMcpMarkChanged(obj);
+    var name = p.name || null;
+    var cut = name ? obj.AddCut(String(name)) : obj.AddCut();
+    if (!cut) throw new Error("AddCut returned null");
+    var contour = cut.Contour;
+    if (!contour) throw new Error("cut.Contour missing");
+    var shapeRes = null;
+    if (kind === "rect") {
+      var x1 = Number(p.x1 !== undefined ? p.x1 : 0);
+      var y1 = Number(p.y1 !== undefined ? p.y1 : 0);
+      var x2 = Number(p.x2 !== undefined ? p.x2 : x1 + (p.width || 40));
+      var y2 = Number(p.y2 !== undefined ? p.y2 : y1 + (p.height || 40));
+      shapeRes = contour.AddRectangle(x1, y1, x2, y2);
+    } else if (kind === "circle") {
+      var cx = Number(p.cx !== undefined ? p.cx : (p.x1 !== undefined ? p.x1 : 0));
+      var cy = Number(p.cy !== undefined ? p.cy : (p.y1 !== undefined ? p.y1 : 0));
+      var rr = Number(p.radius !== undefined ? p.radius : (p.diameter !== undefined ? p.diameter / 2 : 5));
+      shapeRes = contour.AddCircle(cx, cy, rr);
+    } else if (kind === "round_rect") {
+      var x1 = Number(p.x1 !== undefined ? p.x1 : 0);
+      var y1 = Number(p.y1 !== undefined ? p.y1 : 0);
+      var x2 = Number(p.x2 !== undefined ? p.x2 : x1 + (p.width || 40));
+      var y2 = Number(p.y2 !== undefined ? p.y2 : y1 + (p.height || 40));
+      var rc = Number(p.cornerRadius || 2);
+      try { shapeRes = contour.AddRoundRect(x1, y1, x2, y2, rc); }
+      catch (eRR) {
+        try { shapeRes = contour.AddRectangle(x1, y1, x2, y2); } catch (eR2) { shapeRes = "err: " + eRR; }
+      }
+    } else {
+      throw new Error("kind must be rect|circle|round_rect (got '" + kind + "')");
+    }
+    var depth = p.depth !== undefined ? Number(p.depth) : 0;
+    if (depth && basisMcpQuietBool(function () { return typeof cut.Thickness === "number"; })) {
+      try { cut.Thickness = depth; } catch (eT) { /* v1: report */ }
+    }
+    if (p.material) {
+      try { cut.Material = String(p.material); } catch (eMat) { /* v1 */ }
+    }
+    /* резка тела (маркер мутации уже сделан ранее: marker выше) */
+    try { obj.Build(); } catch (eB) { /* continue anyway; report below */ }
+    var committed = basisMcpCommit();
+    obj = basisMcpRefetchByName(obj.Name || "");
+    var cuts = obj ? obj.Cuts.Count : null;
+    var cutDesc = null;
+    try {
+      if (cut) cutDesc = {
+        CutType: basisMcpSafeStr(function () { return cut.CutType; }, null),
+        CutMode: basisMcpSafeStr(function () { return cut.CutMode; }, null),
+        Sign: basisMcpSafeStr(function () { return cut.Sign; }, null),
+        FrontSide: basisMcpSafeStr(function () { return cut.FrontSide; }, null),
+        Material: basisMcpSafeStr(function () { return cut.Material; }, null),
+        Thickness: basisMcpSafeNum(function () { return cut.Thickness; }, null)
+      };
+    } catch (eD) { cutDesc = "err"; }
+    return {
+      pocket: true, kind: kind, marker: marker, committed: committed,
+      name: p.name || null,
+      cw: cwBefore, ch: chBefore,
+      cutsCount: cuts,
+      cutDesc: cutDesc,
+      drawResult: shapeRes === undefined ? "ok" : shapeRes,
+      note: cutDesc ? null : "CutType unreadable (engine quirk) - inspect via holes_info"
+    };
+  },
+
+  add_hole: function (p) {
+    /* ergonomic wrapper: circle on the face plane (z=0) */
+    if (!p || !p.path) throw new Error("add_hole requires path + center");
+    return BASIS_MCP_HANDLERS.set_pocket({
+      path: p.path,
+      kind: "circle",
+      cx: p.cx !== undefined ? Number(p.cx) : Number(p.x1 || 0),
+      cy: p.cy !== undefined ? Number(p.cy) : Number(p.y1 || 0),
+      radius: p.radius !== undefined ? Number(p.radius) : (p.diameter !== undefined ? p.diameter / 2 : 5),
+      name: p.name || null
+    });
   },
 
   open_furniture: function (p) {
