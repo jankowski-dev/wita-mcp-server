@@ -1396,7 +1396,7 @@ var BASIS_MCP_HANDLERS = {
           s[mD[2]] = meas(ch);
         }
         if (/^Door-\d+$/.test(nm)) doors.push({ name: nm, pos: meas(ch).pos });
-        if (nm === "Полкодержатель" || nm.indexOf("Штангодержатель") === 0) meters.push({ name: nm, pos: meas(ch).pos });
+        if (nm.indexOf("\u041f\u043e\u043b\u043a\u043e\u0434\u0435\u0440\u0436\u0430\u0442\u0435\u043b\u044c") === 0 || nm.indexOf("\u0428\u0442\u0430\u043d\u0433\u043e\u0434\u0435\u0440\u0436\u0430\u0442\u0435\u043b\u044c") === 0) meters.push({ name: nm, pos: meas(ch).pos });
         if (basisMcpQuietBool(function () { return ch.Count !== undefined; })) walk(ch);
       }
     };
