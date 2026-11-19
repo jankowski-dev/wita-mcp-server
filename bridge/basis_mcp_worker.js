@@ -930,7 +930,7 @@ var BASIS_MCP_HANDLERS = {
     } catch (e) {
       info.holes = "n/a";
     }
-    /* v0.6.5: cuts added via obj.AddCut — Panel.Holes их не отражает. */
+    /* v0.6.5: cuts added via obj.AddCut - Panel.Holes not reflected. */
     try {
       info.cuts = basisMcpSafeNum(function () { return obj.Cuts.Count; }, null);
       if (info.cuts > 0) {
@@ -1164,7 +1164,7 @@ var BASIS_MCP_HANDLERS = {
     };
   },
 
-  /* pockets/holes — P1 on real engine API (probe_v5): Contour.AddRectangle/
+  /* pockets/holes P1 on real engine API (probe_v5): Contour.AddRectangle/
    * AddCircle/AddRoundRect + Panel.AddCut + Build. */
   set_pocket: function (p) {
     if (!p || !p.path) throw new Error("set_pocket requires path");
@@ -1212,7 +1212,7 @@ var BASIS_MCP_HANDLERS = {
     if (p.material) {
       try { cut.Material = String(p.material); } catch (eMat) { /* v1 */ }
     }
-    /* резка тела (маркер мутации уже сделан ранее: marker выше) */
+    /* rebuild 3D body (design-level marker set above) */
     try { obj.Build(); } catch (eB) { /* continue anyway; report below */ }
     var committed = basisMcpCommit();
     obj = basisMcpRefetchByName(obj.Name || "");
