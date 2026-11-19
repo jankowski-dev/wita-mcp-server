@@ -19,7 +19,7 @@ worker v0.6.2. Все операции вызываются через `basis_ex
 | `get_selection` | — | `{selectedCount, items:[{path,name,type}]}` |
 | `object_info` | `path` | `{name, position:{x,y,z}, gmax, gmin, width,height,depth}` |
 | `list_materials` | — | срез материалов всех панелей, кромок и вырезов: `{panelCount, objectCount, materials[{key,count}], edges[{material,thickness,width,count,key}], cuts{total,names}}` |
-| `holes_info` | `path` | монтажные отверстия панели (диаметры/координаты/стороны) |
+| `holes_info` | `path` | отверстия панели + v0.6.5/6.6: `cuts[]` — вырезы (`AddCut`): `name, CutType, CutMode, Sign, ContourSide, Material, Thickness` |
 
 Серверный алиас `basis_model_summary(includeSizes)` — это тот же `get_model_summary`; параметр фактически всегда «включено» (worker проверяет только `includePanelInfo === false`).
 
@@ -44,6 +44,11 @@ worker v0.6.2. Все операции вызываются через `basis_ex
 | `add_cut` (геометрия) | `line{x1,y1,x2,y2}` | прямолинейная траектория |
 | `add_cut` (мультипойнт) | `points: [[x,y],...]` (≥2) | траектория цепочкой сегментов `i → i+1` |
 | `add_cut` (профиль) | `profile` (обязателен), `moveX?`, `moveY?` | профиль выреза (`Contour.Load`); результат: `{cut, committed, name, trajectory}` |
+| `set_pocket` (v0.6.5) | `path`, `kind: rect\|circle\|round_rect`, `x1,y1[,x2,y2 | cx,cy,radius \| width,height]`, `depth?`, `material?`, `name?` | `{pocket, cutsCount, cutDesc, committed}` — покет/вырез через `Panel.AddCut`+`Contour.AddRectangle/AddCircle/AddRoundRect`+`Build` |
+| `set_pocket` (rect) | `x1,y1,x2,y2` | прямоугольный вырез |
+| `set_pocket` (circle) | `cx,cy,radius` | круглый вырез |
+| `add_hole` (v0.6.5) | `path`, `cx` (или `x1,y1`), `radius \| diameter`, `name?` | обёртка: circle по центру плоскости (z=0) |
+| `cut_delete` (v0.6.7) | `path`, `index` | или `all: true` — удалить вырез по индексу/все вырезы; результат `{cutDelete, committed, objCuts}` |
 
 ### delete_object и дубликаты имён
 
