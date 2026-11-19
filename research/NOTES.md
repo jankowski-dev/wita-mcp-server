@@ -409,3 +409,17 @@
   `wardrobe-design`), Ф4 (`production-docs`, `norms-gost`).
 - Worker на конец сессии не отвечает (сессия завершилась) — перезапуск
   «Скрипты → 0_BasisMCP_worker» при следующей работе.
+
+## Аудит проекта и рекомендации (16.11.2026)
+
+- Выход: `docs/AUDIT.md` (состояние, stale-факты, рекомендации P1–P3, Ф2–Ф4).
+- Дефекты доки: `add_cut` — не полный опис (нет `depth`, `profile`, координат);
+  `object_info.width/height/depth` — всегда null (не читаются); U-высота 720
+  против «700–900» в SKILLS-ROADMAP — расхождение (синхронизировано с NOTES).
+- Stale: `git log` OPERATIONS v0.6.1 (файл забыт), короткая таблица DESIGN-RULES
+  (столешница 38, кромка без базы).
+- Рекомендации: P1 — set_pocket/cut_rect/add_hole/chamfer(round_edge),
+  place_section/polyline_cut, attach_gasket; P2 — trim_panel, top_plate,
+  check_intersections (API `checkIntersects`), part_size_by_code.
+  Ф4 — generate_stp, validate_design, dimensioning_plan.
+- Статус: audit чист по дереву + git; live-проверка model — при worker restart.
