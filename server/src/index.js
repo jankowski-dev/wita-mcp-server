@@ -196,10 +196,11 @@ server.registerTool(
     description:
       "Отправляет команду резидентному worker'у в БАЗИС и ждёт результат. Worker исполняет очередь сам. " +
       "Если статус worker'а не listening (basis_status) — попросите пользователя запустить «Скрипты → 0_BasisMCP_worker». " +
-      "На «unknown op» — тоже рестарт: worker старой версии. Операции (v0.6.1): ping, get_active_file, get_model_summary, " +
-      "get_selection, object_info, list_materials, add_panel, set_panel_material, batch_set_material, rename_object, " +
-      "delete_object (guard «Габаритная рамка» → force), add_cut, holes_info, object_move, resize_panel, copy_object, " +
-      "enable_butt_picker, add_butt, open_furniture, mount_furniture, mount_scheme, edit_probe, model_commit, worker_stop.",
+      "На «unknown op» — тоже рестарт: worker старой версии. Операции (v0.6.9): ping, get_active_file, get_model_summary, " +
+      "get_selection, object_info, list_materials, fasteners_spec, add_panel, set_panel_material, batch_set_material, " +
+      "rename_object, delete_object (guard «Габаритная рамка» → force), add_cut, holes_info, set_pocket, add_hole, cut_delete, " +
+      "object_move, resize_panel, copy_object, enable_butt_picker, add_butt, open_furniture, mount_furniture, mount_scheme, " +
+      "probe_v4, probe_v5, probe_v6, edit_probe, model_commit, worker_stop.",
     inputSchema: {
       op: z.string().min(1).describe("Имя операции, например ping / get_model_summary / add_panel"),
       params: z.record(z.any()).optional().describe("Параметры операции"),

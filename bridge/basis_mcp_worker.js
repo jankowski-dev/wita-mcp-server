@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.6.8  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.9  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.8";
+var BASIS_MCP_VERSION = "0.6.9";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -1371,52 +1371,60 @@ var BASIS_MCP_HANDLERS = {
   /* P3 spec-measure for the current model: facade gaps, drawer box geometry,
    * door panels, meters. Uses Position/ContourWidth/Height (verified probes). */
   fasteners_spec: function () {
-    var out = { drawers: [], doors: [], meters: [] };
-    var n = basisMcpSafeNum(function () { return Model.Count; }, 0) || 0;
+    var out = { drawers: {}, drawerRows: [], doors: [], doorGaps: [], meters: [], counts: {} };
     var drawers = {};
     var doors = [];
     var meters = [];
+    var counts = { panels: 0, euro: 0, hinges: 0 };
     function meas(o) {
-      var r = { pos: basisMcpPosOf(o),
-                cw: basisMcpSafeNum(function () { return o.ContourWidth; }, null),
-                ch: basisMcpSafeNum(function () { return o.ContourHeight; }, null) };
-      try { var gm = o.GMin; r.gmin = [gm.x, gm.y, gm.z]; } catch (e1) {}
-      try { var gx = o.GMax; r.gmax = [gx.x, gx.y, gx.z]; } catch (e2) {}
-      return r;
+      return {
+        pos: basisMcpPosOf(o),
+        cw: basisMcpSafeNum(function () { return o.ContourWidth; }, null),
+        ch: basisMcpSafeNum(function () { return o.ContourHeight; }, null)
+      };
     }
+    var euroName = "\u0415\u0432\u0440\u043e\u0432\u0438\u043d\u0442 6\u044550";
     var walk = function (list) {
       var c = basisMcpSafeNum(function () { return list.Count; }, 0) || 0;
       for (var k = 0; k < c; k++) {
         var ch = basisMcpChildOf(list, k);
         if (!ch) continue;
         var nm = basisMcpSafeStr(function () { return ch.Name; }, "");
-        var mD = nm ? /^S[12]-D(\d)-(Facade|Bottom)$/.exec(nm) : null;
+        if (basisMcpQuietBool(function () { return ch.Butts !== undefined && ch.Contour !== undefined; })) counts.panels++;
+        if (nm === euroName) counts.euro++;
+        if (nm.indexOf("\u041f\u0435\u0442\u043b\u044f") === 0) counts.hinges++;
+        var mD = nm ? /^S([12])-D(\d)-(Facade|Bottom|SideL|SideR|Back|Front)$/.exec(nm) : null;
         if (mD) {
-          var s = (drawers["S" + mD[1]] = drawers["S" + mD[1]] || {});
-          s[mD[2]] = meas(ch);
+          var key = "S" + mD[1] + "-D" + mD[2];
+          var s = (drawers[key] = drawers[key] || {});
+          s[mD[3]] = meas(ch);
         }
-        if (/^Door-\d+$/.test(nm)) doors.push({ name: nm, pos: meas(ch).pos });
+        if (/^Door-\d+$/.test(nm)) doors.push({ name: nm, pos: meas(ch).pos, cw: meas(ch).cw, ch: meas(ch).ch });
         if (nm.indexOf("\u041f\u043e\u043b\u043a\u043e\u0434\u0435\u0440\u0436\u0430\u0442\u0435\u043b\u044c") === 0 || nm.indexOf("\u0428\u0442\u0430\u043d\u0433\u043e\u0434\u0435\u0440\u0436\u0430\u0442\u0435\u043b\u044c") === 0) meters.push({ name: nm, pos: meas(ch).pos });
         if (basisMcpQuietBool(function () { return ch.Count !== undefined; })) walk(ch);
       }
     };
     walk(Model);
-    Object.keys(drawers).forEach(function (k) {
-      var d = drawers[k];
-      var gap = null;
-      try {
-        if (d.Facade && d.Bottom) {
-          gap = {
-            facadeW: d.Facade.cw, bottomW: d.Bottom.cw,
-            deltaW: d.Facade.cw - d.Bottom.cw,
-            height: d.Bottom.ch, depth: d.Bottom.cw
-          };
-        }
-      } catch (eG) {}
-      out.drawers.push({ drawer: k, gap: gap });
+    Object.keys(drawers).sort().forEach(function (key) {
+      var d = drawers[key];
+      var row = { drawer: key, box: null, facade: null, overhangSide: null, facadeDX: null };
+      if (d.Bottom) row.box = { w: d.Bottom.cw, d: d.Bottom.ch, pos: d.Bottom.pos };
+      if (d.Facade) row.facade = { w: d.Facade.cw, h: d.Facade.ch, pos: d.Facade.pos };
+      if (d.Bottom && d.Facade) {
+        row.overhangSide = Math.round((d.Facade.cw - d.Bottom.cw) / 2 * 10) / 10;
+        if (d.Bottom.pos && d.Facade.pos) row.facadeDX = Math.round((d.Facade.pos.x - d.Bottom.pos.x) * 10) / 10;
+      }
+      out.drawerRows.push(row);
     });
-    out.doors = doors.map(function (d) { return { name: d.name, pos: d.pos }; });
-    out.meters = meters.map(function (m) { return { name: m.name, pos: m.pos }; });
+    doors.sort(function (a, b) { return (a.pos && b.pos) ? a.pos.x - b.pos.x : 0; });
+    out.doors = doors.map(function (d) { return { name: d.name, pos: d.pos, w: d.cw, h: d.ch }; });
+    for (var di = 0; di < doors.length; di++) {
+      var A = doors[di], B = doors[di + 1];
+      if (!A || !B || !A.pos || !B.pos || !A.cw) continue;
+      out.doorGaps.push({ from: A.name, to: B.name, gap: Math.round((B.pos.x - (A.pos.x + A.cw)) * 10) / 10 });
+    }
+    out.meters = meters;
+    out.counts = counts;
     return out;
   },
 

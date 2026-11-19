@@ -48,7 +48,8 @@ worker v0.6.2. Все операции вызываются через `basis_ex
 | `set_pocket` (rect) | `x1,y1,x2,y2` | прямоугольный вырез |
 | `set_pocket` (circle) | `cx,cy,radius` | круглый вырез |
 | `add_hole` (v0.6.5) | `path`, `cx` (или `x1,y1`), `radius \| diameter`, `name?` | обёртка: circle по центру плоскости (z=0) |
-| `cut_delete` (v0.6.7) | `path`, `index` | или `all: true` — удалить вырез по индексу/все вырезы; результат `{cutDelete, committed, objCuts}` |
+| `cut_delete` (v0.6.7) | `path`, `index?`, `all?` | удалить вырез по индексу или все; результат `{cutDelete, committed, objCuts, result, attempts}` |
+| `fasteners_spec` (v0.6.9) | — | измерение модели: `{drawerRows[{drawer:"S1-D1", box{w,d,pos}, facade{w,h,pos}, overhangSide, facadeDX}], doors[{name,pos,w,h}], doorGaps[{from,to,gap}], meters[], counts{panels,euro,hinges}}` |
 
 ### delete_object и дубликаты имён
 
@@ -130,6 +131,9 @@ Mount(полка, боковина, x, y, z)
 |---|---|
 | `worker_stop` | завершить сессию после текущего цикла |
 | `edit_probe` | диагностика движка на черновой панели (мутации + откаты, скан Schema Clone/Butt); чистит за собой |
+| `probe_v4` | инвентарь API панели: методы/ответственные реквесты (AddRectHole/RoundEdge/...); только чтение + scratch |
+| `probe_v5` | реальная поверхность API: прототипы Panel/Cuts/Contour, Cut-поля; только чтение + scratch |
+| `probe_v6` | доступ к Cuts ([i]/Item) + контурные `Rounding/RoundingEx/Facet/Symmetry/...`; scratch |
 | `enable_butt_picker` / `model_commit` | см. выше |
 
 ## Ошибки
