@@ -496,6 +496,85 @@ var BASIS_MCP_HANDLERS = {
    * reverted (commit + confirm). Establishes: global vs local coords, and
    * which primitives really work: Position set / Translate / Contour.Move /
    * Contour.Clear+AddRectangle / Clone. */
+  /* Probe v4: inventory for the P1 plan (pockets/holes/chamfer/gasket ops)
+   * + guarded trial calls of candidate engine APIs on a scratch panel. */
+  probe_v4: function () {
+    var out = { inventory: {}, tries: [], cleanup: {}, notes: [] };
+    out.notes.push("creates scratch panel MCP-ProbeV4, inventories API, trial calls, cleanup");
+
+    function inv(o, names) {
+      var r = {};
+      for (var i = 0; i < names.length; i++) {
+        try { r[names[i]] = typeof o[names[i]]; } catch (e) { r[names[i]] = "err"; }
+      }
+      return r;
+    }
+    function tryCall(tag, fn) {
+      var entry = { tag: tag };
+      try { entry.result = fn(); }
+      catch (e) { entry.result = "err: " + String(e).slice(0, 120); }
+      out.tries.push(entry);
+      return entry;
+    }
+
+    var panel = AddFrontPanel(2300, 100, 2450, 200, 330);
+    if (!panel) throw new Error("probe panel not created");
+    try { panel.Name = "MCP-ProbeV4"; } catch (eN) { /* keep default */ }
+    var committed = basisMcpCommit();
+    var p0 = basisMcpFindByPath(["MCP-ProbeV4"]);
+    out.inventory.panel = inv(p0, [
+      "AddRectHole", "AddRoundHole", "AddRect", "AddRound", "RoundEdge", "Chamfer",
+      "AttachGasket", "AttachFastener", "AddPlate", "AddMeter", "GapEdge", "PushFace",
+      "SetEdgePoint", "AddCut", "NewArea", "AddGasket", "AddKrepWay"
+    ]);
+    [["Body"], ["Gts"], ["Params"], ["Editor"], ["Soeller"], ["Meter"], ["EdgeLoop"], ["DisPlace"]].forEach(function (nm) {
+      var nm0 = nm[0];
+      var o = null;
+      try { o = p0[nm0]; } catch (e) { o = null; }
+      if (o && typeof o === "object") out.inventory[nm0] = inv(o, ["AddRectHole", "AddRoundHole", "AddLine", "AddPoint", "Move", "RoundEdge", "Chamfer", "AddPlate", "AddMeter", "PushFace", "Create", "NewEdge", "SetEdgePoint"]);
+    });
+    out.inventory.contour = inv(p0.Contour, ["AddLine", "AddRectangle", "AddPoint", "Move", "Rotate", "AddChamfer"]);
+
+    /* Trial calls: guarded; scratch panel only. */
+    tryCall("AddRectHole(NewArea+rect 5,5 20x20)", function () {
+      if (typeof p0.AddRectHole !== "function") return "skip-missing";
+      try {
+        var a = NewArea();
+        a.AddRect(NewVector(5, 5), NewVector(25, 25));
+        return p0.AddRectHole(a);
+      } catch (e) { return "err: " + String(e).slice(0, 120); }
+    });
+    tryCall("AddRoundHole(NewVector(5,5), r=5)", function () {
+      if (typeof p0.AddRoundHole !== "function") return "skip-missing";
+      try { var h = p0.AddRoundHole(NewVector(5, 5), 5); return h ? "ok" : "null"; } catch (e) { return "err: " + String(e).slice(0, 120); }
+    });
+    tryCall("AddPlate('') #calibration", function () {
+      if (typeof p0.AddPlate !== "function") return "skip-missing";
+      try { var r = p0.AddPlate(""); return r ? "ok" : "null"; } catch (e) { return "err: " + String(e).slice(0, 120); }
+    });
+    tryCall("RoundEdge variants", function () {
+      if (typeof p0.RoundEdge !== "function") return "skip-missing";
+      try { return p0.RoundEdge(NewVector(0, 0), 3); } catch (e1) {
+        try { return p0.RoundEdge(3); } catch (e2) {
+          try { return p0.RoundEdge(); } catch (e3) { return "err: " + String(e3).slice(0, 120); }
+        }
+      }
+    });
+    tryCall("Chamfer()", function () {
+      if (typeof p0.Chamfer !== "function") return "skip-missing";
+      try { return p0.Chamfer(); } catch (e) { return "err: " + String(e).slice(0, 120); }
+    });
+    tryCall("AttachGasket('F433...1381123')", function () {
+      if (typeof p0.AttachGasket !== "function") return "skip-missing";
+      try { return p0.AttachGasket("F433 ST10 \u041b\u0451\u043d \u0430\u043d\u0442\u0440\u0430\u0446\u0438\u0442\r1381123"); } catch (e) { return "err: " + String(e).slice(0, 120); }
+    });
+
+    /* cleanup: delete scratch panel, commit */
+    try { DeleteObject(basisMcpFindByPath(["MCP-ProbeV4"])); basisMcpCommit(); }
+    catch (eC) { out.cleanup.deletedScratch = "err: " + eC; }
+    return out;
+  },
+
   edit_probe: function () {
     var out = { steps: [], methodScan: {}, notes: [] };
     out.notes.push("each mutation: marker -> mutate -> commit -> refetch -> read -> revert -> commit -> confirm");
