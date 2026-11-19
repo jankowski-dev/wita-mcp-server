@@ -1,5 +1,5 @@
 /*
- * Basis MCP worker v0.6.3  (old-API, BASIS 2022)
+ * Basis MCP worker v0.6.4  (old-API, BASIS 2022)
  * ASCII-only on purpose: the engine reads sources in CP1251.
  *
  * HOW LIVENESS WORKS (documented old-API mechanism):
@@ -21,7 +21,7 @@
  * EXCHANGE DIR: C:\Users\Public\basis-mcp (inbox / outbox / states / log)
  */
 
-var BASIS_MCP_VERSION = "0.6.3";
+var BASIS_MCP_VERSION = "0.6.4";
 var BASIS_MCP_ROOT = "C:\\Users\\Public\\basis-mcp";
 var BASIS_MCP_INBOX = BASIS_MCP_ROOT + "\\inbox";
 var BASIS_MCP_OUTBOX = BASIS_MCP_ROOT + "\\outbox";
@@ -575,7 +575,7 @@ var BASIS_MCP_HANDLERS = {
     return out;
   },
 
-  /* Probe v5: real API surface scan — own properties + prototype chains
+  /* Probe v5: real API surface scan - own properties + prototype chains
    * for panel, its Cuts list, a new Cut, Contour, Butts (and the global
    * class Object constructor for good measure). Read-only + scratch panel. */
   probe_v5: function () {
@@ -646,7 +646,7 @@ var BASIS_MCP_HANDLERS = {
     } catch (eCUT) { out.cut = "err: " + String(eCUT).slice(0, 120); }
 
     /* Global surface: Object + NewArea/NewContour (area constructor, as
-     * seen in guide examples) — whatever actually exists on the global. */
+     * seen in guide examples) - whatever actually exists on the global. */
     try {
       var oKeys = [];
       try { oKeys = Object.getOwnPropertyNames(Object.prototype); } catch (eOP) { oKeys = []; }
